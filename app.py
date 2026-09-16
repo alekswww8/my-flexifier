@@ -145,7 +145,6 @@ def ball_joint(h, res, height):
 
 
 st.set_page_config(layout="wide")
-st.title("Flexifier: Интерактивный редактор")
 
 if 'height_val' not in st.session_state:
     st.session_state['height_val'] = 8.0
@@ -158,13 +157,14 @@ if 'hinge_list' not in st.session_state:
 if 'cur_h_idx' not in st.session_state:
     st.session_state['cur_h_idx'] = 0
 
-col_settings, col_view = st.columns([1, 2])
-
-with col_settings:
+# Боковая панель для общих настроек
+with st.sidebar:
+    st.title("⚙️ Настройки")
     filetype = st.selectbox("Формат файла", ["jpg", "png", "jpeg", "svg"])
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
+    uploaded_file = st.file_uploader("Загрузите файл", type=[filetype])
 
-    st.write(f"**Толщина детали (Z):** {st.session_state['height_val']:.1f} мм")
+    st.write(f"**Толщина детали:** {st.session_state['height_val']:.1f} мм")
     hb1, hb2 = st.columns(2)
     with hb1:
         if st.button("➖ Тоньше"):
@@ -174,8 +174,6 @@ with col_settings:
         if st.button("➕ Толще"):
             st.session_state['height_val'] = min(50.0, st.session_state['height_val'] + 1.0)
             st.rerun()
-
-    uploaded_file = st.file_uploader("Загрузите файл", type=[filetype])
 
 if uploaded_file is not None:
     raw_path = f"file.{filetype}"
@@ -200,19 +198,23 @@ if uploaded_file is not None:
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
 
-    with col_settings:
-        st.write("---")
-        st.write("### Управление шарнирами:")
+    # Две колонки строго на одном уровне вверху экрана
+    col_ctrl, col_img = st.columns([1, 1.2])
+
+    with col_ctrl:
+        st.subheader("Управление шарнирами")
         h_options = [f"Шарнир №{i+1}" for i in range(len(st.session_state['hinge_list']))]
-        selected = st.selectbox("Выберите активный шарнир:", h_options, index=st.session_state['cur_h_idx'])
+        selected = st.selectbox("Активный шарнир:", h_options, index=st.session_state['cur_h_idx'])
         h_idx = h_options.index(selected)
         st.session_state['cur_h_idx'] = h_idx
 
         cur_h = st.session_state['hinge_list'][h_idx]
-        cur_h['type'] = st.selectbox("Тип соединения:", ["normal", "ball"], index=0 if cur_h['type'] == 'normal' else 1)
+        cur_h['type'] = st.selectbox("Тип шарнира:", ["normal", "ball"], index=0 if cur_h['type'] == 'normal' else 1)
 
-        st.write(f"Позиция X: **{cur_h['x']:.1f} мм** | Y: **{cur_h['y']:.1f} мм**")
-        
+        st.markdown(f"**X:** `{cur_h['x']:.1f} мм` | **Y:** `{cur_h['y']:.1f} мм` | **Угол:** `{cur_h['rot']:.0f}°`")
+
+        # Кнопки перемещения
+        st.write("Смещение:")
         p1, p2, p3, p4 = st.columns(4)
         with p1:
             if st.button("⬅️ -5мм"):
@@ -231,91 +233,98 @@ if uploaded_file is not None:
                 cur_h['y'] += 5.0
                 st.rerun()
 
+        # Поворот
+        st.write("Поворот:")
         r1, r2 = st.columns(2)
         with r1:
-            if st.button("🔄 Повернуть (-15°)"):
+            if st.button("🔄 -15°"):
                 cur_h['rot'] -= 15.0
                 st.rerun()
         with r2:
-            if st.button("🔁 Повернуть (+15°)"):
+            if st.button("🔁 +15°"):
                 cur_h['rot'] += 15.0
                 st.rerun()
 
         st.write("---")
-        add_col, rem_col = st.columns(2)
-        with add_col:
-            if st.button("➕ Добавить шарнир"):
+        add_c, rem_c = st.columns(2)
+        with add_c:
+            if st.button("➕ Добавить"):
                 st.session_state['hinge_list'].append({'x': 0.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'})
                 st.rerun()
-        with rem_col:
-            if st.button("🗑️ Удалить шарнир", disabled=(len(st.session_state['hinge_list']) <= 1)):
+        with rem_c:
+            if st.button("🗑️ Удалить", disabled=(len(st.session_state['hinge_list']) <= 1)):
                 st.session_state['hinge_list'].pop(h_idx)
                 st.session_state['cur_h_idx'] = 0
                 st.rerun()
 
-    # Генерация предпросмотра с меткой оси шарнира
-    scad_preview_parts = []
+        st.write("---")
+        build_btn = st.button("🚀 Собрать модель (STL/STEP)", use_container_width=True)
+
+    # Генерация предпросмотра
+    scad_parts = []
     for i, h in enumerate(st.session_state['hinge_list']):
         is_active = (i == h_idx)
-        bar_color = "red" if is_active else "navy"
-        dot_color = "yellow" if is_active else "white"
-        
-        scad_preview_parts.append(
+        bar_col = "red" if is_active else "navy"
+        dot_col = "yellow" if is_active else "white"
+        scad_parts.append(
             f'''
             translate([{h["x"]}, {h["y"]}, 0]) rotate([0, 0, {h["rot"]}]) {{
-                color("{bar_color}") linear_extrude({st.session_state["height_val"] * 1.3}) square([3, {bbox.ylen * 1.5}], center=true);
-                color("{dot_color}") translate([0, 0, {st.session_state["height_val"]}]) sphere(d={st.session_state["height_val"] * 1.2});
+                color("{bar_col}") linear_extrude({st.session_state["height_val"] * 1.3}) square([3, {bbox.ylen * 1.5}], center=true);
+                color("{dot_col}") translate([0, 0, {st.session_state["height_val"]}]) cylinder(d={st.session_state["height_val"] * 1.2}, h=2, center=true);
             }}
             '''
         )
 
-    preview_scad_code = f"""
-    $fn=20;
+    preview_code = f"""
+    $fn=25;
     color("lightgreen") linear_extrude({st.session_state['height_val']}) import("file.dxf");
-    {' '.join(scad_preview_parts)}
+    {' '.join(scad_parts)}
     """
     with open("live_preview.scad", "w") as f:
-        f.write(preview_scad_code)
+        f.write(preview_code)
 
     subprocess.run(
-        "xvfb-run -a openscad -o live_preview.png --camera 0,0,0,0,0,0,0 --projection=ortho --autocenter --viewall live_preview.scad",
+        "xvfb-run -a openscad -o live_preview.png --autocenter --viewall --projection=ortho live_preview.scad",
         shell=True
     )
 
-    with col_view:
+    with col_img:
+        st.subheader("Предпросмотр")
         if os.path.exists("live_preview.png"):
-            st.image("live_preview.png", caption="🟡 Желтый шар — центр активного шарнира | ⚪ Белый шар — остальные шарниры", use_container_width=True)
+            st.image("live_preview.png", caption="🟡 Желтый диск — активный шарнир | ⚪ Белый — остальные", use_container_width=True)
 
-        if st.button("🚀 Собрать финальную модель (STL/STEP)", use_container_width=True):
-            with st.spinner("Генерация CAD-геометрии..."):
-                current_height = st.session_state['height_val']
-                res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
+    if build_btn:
+        with st.spinner("Генерация CAD-модели..."):
+            current_height = st.session_state['height_val']
+            res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
 
-                for h in st.session_state['hinge_list']:
-                    h_dict = {
-                        "type": h["type"],
-                        "h_tran": [h["x"], h["y"]],
-                        "h_rot": h["rot"],
-                        "h_break": 3.0,
-                        "h_break_len": bbox.ylen * 2.0,
-                        "h_diam": current_height,
-                        "h_thick": 5.0,
-                        "h_expose": True
-                    }
-                    if h["type"] == "normal":
-                        res = normal_hinge(h_dict, res, current_height)
-                    else:
-                        res = ball_joint(h_dict, res, current_height)
+            for h in st.session_state['hinge_list']:
+                h_dict = {
+                    "type": h["type"],
+                    "h_tran": [h["x"], h["y"]],
+                    "h_rot": h["rot"],
+                    "h_break": 3.0,
+                    "h_break_len": bbox.ylen * 2.0,
+                    "h_diam": current_height,
+                    "h_thick": 5.0,
+                    "h_expose": True
+                }
+                if h["type"] == "normal":
+                    res = normal_hinge(h_dict, res, current_height)
+                else:
+                    res = ball_joint(h_dict, res, current_height)
 
-                out_file = f"result.{out_format}"
-                cq.exporters.export(res, out_file)
-                st.success("Модель успешно сгенерирована!")
+            out_file = f"result.{out_format}"
+            cq.exporters.export(res, out_file)
+            st.success("Готово!")
 
-                with open(out_file, "rb") as f:
-                    st.download_button(
-                        label=f"💾 Скачать результат ({out_format.upper()})",
-                        data=f,
-                        file_name=out_file,
-                        mime=f"model/{out_format}",
-                        use_container_width=True
-                    )
+            with open(out_file, "rb") as f:
+                st.download_button(
+                    label=f"💾 Скачать {out_format.upper()}",
+                    data=f,
+                    file_name=out_file,
+                    mime=f"model/{out_format}",
+                    use_container_width=True
+                )
+else:
+    st.info("👈 Загрузите файл изображения в боковом меню слева, чтобы начать работу.")
