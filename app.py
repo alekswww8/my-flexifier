@@ -189,7 +189,6 @@ if uploaded_file is not None:
     with open(raw_path, "wb") as f:
         f.write(uploaded_file.getvalue())
 
-    # Векторизация
     if filetype == "png":
         subprocess.run(f"convert {raw_path} -background white -alpha remove -alpha off {raw_path}", shell=True)
     if filetype != "svg":
@@ -204,12 +203,11 @@ if uploaded_file is not None:
         f.write(f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg", center = true);')
     subprocess.run("openscad svg_to_dxf.scad -o file.dxf", shell=True)
 
-    # Загружаем базовую модель с center=true
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
 
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
-    c_width = 600
+    c_width = 500
     c_height = int(raw_img.height * (c_width / raw_img.width))
     bg_img = raw_img.resize((c_width, c_height))
 
@@ -223,7 +221,7 @@ if uploaded_file is not None:
             height=c_height,
             width=c_width,
             drawing_mode="line",
-            key="fixed_canvas"
+            key="aligned_canvas"
         )
 
     hinges = []
@@ -235,19 +233,17 @@ if uploaded_file is not None:
             x2 = obj.get("x2", x1 + obj.get("width", 0))
             y2 = obj.get("y2", y1 + obj.get("height", 0))
 
-            # Перевод кликов холста относительно его центра (0, 0)
-            cx_pix = (x1 + x2) / 2.0 - (c_width / 2.0)
-            cy_pix = (y1 + y2) / 2.0 - (c_height / 2.0)
+            # Позиция центра линии от 0.0 до 1.0 внутри изображения
+            u = ((x1 + x2) / 2.0) / c_width
+            v = ((y1 + y2) / 2.0) / c_height
 
-            # Маппинг пикселей холста в миллиметры модели
-            cq_x = cx_pix * (bbox.xlen / c_width)
-            cq_y = -cy_pix * (bbox.ylen / c_height)
+            # Точный маппинг в диапазон [xmin, xmax] и [ymin, ymax]
+            cq_x = bbox.xmin + u * (bbox.xmax - bbox.xmin)
+            cq_y = bbox.ymax - v * (bbox.ymax - bbox.ymin)
 
-            dx = (x2 - x1) * (bbox.xlen / c_width)
-            dy = -(y2 - y1) * (bbox.ylen / c_height)
-            line_len = math.sqrt(dx**2 + dy**2)
-            
-            # В оригинале разрез вдоль Y соответствует повороту 0, вертикальный разрез:
+            # Расчет угла (вертикальная линия сверху вниз дает угол 0 градусов)
+            dx = (x2 - x1)
+            dy = (y2 - y1)
             angle = math.degrees(math.atan2(dx, dy))
 
             hinges.append({
@@ -255,7 +251,7 @@ if uploaded_file is not None:
                 "h_tran": [cq_x, cq_y],
                 "h_rot": angle,
                 "h_break": 3.0,
-                "h_break_len": max(line_len * 1.6, bbox.ylen * 1.5),
+                "h_break_len": bbox.ylen * 2.0,
                 "h_diam": st.session_state['height_val'],
                 "h_thick": 5.0,
                 "h_expose": True
