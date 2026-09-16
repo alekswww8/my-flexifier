@@ -148,13 +148,10 @@ def ball_joint(h, res, height):
 st.set_page_config(layout="wide")
 st.title("Flexifier: Интерактивный редактор")
 
-# Инициализация хранилища
 if 'height_val' not in st.session_state:
     st.session_state['height_val'] = 8.0
 if 'scale_val' not in st.session_state:
     st.session_state['scale_val'] = 100
-if 'detected_hinges' not in st.session_state:
-    st.session_state['detected_hinges'] = []
 
 col_settings, col_canvas = st.columns([1, 2])
 
@@ -202,7 +199,6 @@ if uploaded_file is not None:
 
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
     
-    # Расчет размера под масштаб
     base_w = 600
     base_h = int(raw_img.height * (base_w / raw_img.width))
     cur_scale = st.session_state['scale_val'] / 100.0
@@ -216,60 +212,54 @@ if uploaded_file is not None:
             stroke_width=4,
             stroke_color="#FF0000",
             background_image=bg_img,
-            update_streamlit=False,  # Отправляет данные по кнопке, избегая подвисания
+            update_streamlit=True,
             height=c_height,
             width=c_width,
             drawing_mode="line",
             key="fixed_canvas"
         )
 
-        c_b1, c_b2 = st.columns(2)
-        with c_b1:
-            save_lines = st.button("✅ Сохранить нарисованные линии", use_container_width=True)
-        with c_b2:
-            if st.button("🗑️ Сбросить всё", use_container_width=True):
-                st.session_state['detected_hinges'] = []
-                st.rerun()
-
-    # Считывание координат при нажатии на кнопку подтверждения
-    if save_lines and canvas_result.json_data is not None:
-        new_hinges = []
+    # Автоматическое распознавание линий сразу при отпускании мыши
+    hinges = []
+    if canvas_result.json_data is not None:
         objects = canvas_result.json_data.get("objects", [])
         for obj in objects:
-            if obj.get("type") == "line":
-                x1 = obj.get("x1", obj.get("left", 0))
-                y1 = obj.get("y1", obj.get("top", 0))
-                x2 = obj.get("x2", x1 + obj.get("width", 0))
-                y2 = obj.get("y2", y1 + obj.get("height", 0))
+            # Поддержка Fabric.js: берем x1, y1, x2, y2 или относительные left/top
+            x1 = obj.get("x1")
+            y1 = obj.get("y1")
+            x2 = obj.get("x2")
+            y2 = obj.get("y2")
+            
+            if x1 is None or x2 is None:
+                x1 = obj.get("left", 0)
+                y1 = obj.get("top", 0)
+                x2 = x1 + obj.get("width", 0)
+                y2 = y1 + obj.get("height", 0)
 
-                cx = (x1 + x2) / 2.0 - (c_width / 2.0)
-                cy = -((y1 + y2) / 2.0 - (c_height / 2.0))
-                dx = x2 - x1
-                dy = -(y2 - y1)
-                length = math.sqrt(dx**2 + dy**2)
-                angle = math.degrees(math.atan2(dy, dx))
+            cx = (x1 + x2) / 2.0 - (c_width / 2.0)
+            cy = -((y1 + y2) / 2.0 - (c_height / 2.0))
+            dx = x2 - x1
+            dy = -(y2 - y1)
+            length = math.sqrt(dx**2 + dy**2)
+            angle = math.degrees(math.atan2(dy, dx))
 
-                new_hinges.append({
-                    "type": hinge_type,
-                    "h_tran": [cx * 0.4, cy * 0.4],
-                    "h_rot": angle,
-                    "h_break": 3.0,
-                    "h_break_len": max(length * 0.4, 25.0),
-                    "h_diam": st.session_state['height_val'],
-                    "h_thick": 5.0,
-                    "h_expose": True
-                })
-        st.session_state['detected_hinges'] = new_hinges
-        st.rerun()
-
-    hinges = st.session_state['detected_hinges']
+            hinges.append({
+                "type": hinge_type,
+                "h_tran": [cx * 0.4, cy * 0.4],
+                "h_rot": angle,
+                "h_break": 3.0,
+                "h_break_len": max(length * 0.4, 25.0),
+                "h_diam": st.session_state['height_val'],
+                "h_thick": 5.0,
+                "h_expose": True
+            })
 
     with col_settings:
         st.write(f"Шарниров нарисовано: **{len(hinges)}**")
 
         if st.button("🚀 Собрать модель"):
             if len(hinges) == 0:
-                st.warning("Сначала нарисуйте линии и нажмите кнопку «Сохранить нарисованные линии»!")
+                st.warning("Нарисуйте хотя бы одну линию на изображении!")
             else:
                 with st.spinner("Экструзия и вырезание шарниров..."):
                     current_height = st.session_state['height_val']
