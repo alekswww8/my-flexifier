@@ -17,20 +17,20 @@ def cut_image(h, res, height):
     chamfer = h['h_break'] * chamfer_multi
     cut_im = (
         cq.Workplane('XY')
-        .box(h['h_break'], h['h_break_len'], height, centered=(1, 1, 0))
+        .box(h['h_break'], h['h_break_len'], height * 1.5, centered=(True, True, True))
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
-        .translate([h['h_tran'][0], h['h_tran'][1], 0])
+        .translate([h['h_tran'][0], h['h_tran'][1], height / 2])
     )
     chamfer_top = (
         cq.Workplane('XY')
-        .box(chamfer, h['h_break_len'], chamfer)
+        .box(chamfer, h['h_break_len'], chamfer, centered=(True, True, True))
         .rotate([0, 0, 0], [0, 1, 0], 45)
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     chamfer_bot = (
         cq.Workplane('XY')
-        .box(chamfer, h['h_break_len'], chamfer)
+        .box(chamfer, h['h_break_len'], chamfer, centered=(True, True, True))
         .rotate([0, 0, 0], [0, 1, 0], 45)
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], height])
@@ -47,8 +47,8 @@ def normal_hinge(h, res, height):
     hole_h_im_x = (h['h_diam'] + pin_diam) / 2 + hor_tolerance
     hole_im = (
         cq.Workplane('XY')
-        .box(hole_h_im_x, h['h_thick'] + hor_tolerance * 2, height, centered=(1, 1, 0))
-        .translate([-hole_h_im_x / 2 - h['h_break'] / 2, 0, 0])
+        .box(hole_h_im_x, h['h_thick'] + hor_tolerance * 2, height * 1.2, centered=(True, True, True))
+        .translate([-hole_h_im_x / 2 - h['h_break'] / 2, 0, height / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
@@ -57,28 +57,28 @@ def normal_hinge(h, res, height):
     hole_diam = pin_diam + vert_tolerance
     hinge_corn = (
         cq.Workplane('XZ')
-        .box(hole_h_im_x / 2 + chamfer * math.sqrt(2), h['h_diam'], h['h_thick'], centered=(0, 0, 1))
+        .box(hole_h_im_x / 2 + chamfer * math.sqrt(2), h['h_diam'], h['h_thick'], centered=(False, False, True))
         .translate([-h['h_break'] / 2 - pin_diam / 2, 0, height / 2 - h['h_diam'] / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_ext = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'], h['h_diam'] / 2, centered=(1, 0, 1))
+        .cylinder(h['h_thick'], h['h_diam'] / 2, centered=(True, False, True))
         .translate([x_hinge, 0, height / 2 - h['h_diam'] / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_hole = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'], hole_diam / 2, centered=(1, 0, 1))
+        .cylinder(h['h_thick'], hole_diam / 2, centered=(True, False, True))
         .translate([x_hinge, 0, height / 2 - hole_diam / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_pin = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'] + hor_tolerance * 2, pin_diam / 2, centered=(1, 0, 1))
+        .cylinder(h['h_thick'] + hor_tolerance * 2, pin_diam / 2, centered=(True, False, True))
         .translate([x_hinge, 0, height / 2 - pin_diam / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
@@ -107,7 +107,7 @@ def ball_joint(h, res, height):
     if h.get('h_expose', True):
         hole_join = (
             cq.Workplane('XY')
-            .box(h['h_break'] + (h['h_diam'] / 2 + hor_tolerance) * 2, h['h_diam'] / 2 + hor_tolerance, height, centered=(1, 1, 0))
+            .box(h['h_break'] + (h['h_diam'] / 2 + hor_tolerance) * 2, h['h_diam'] / 2 + hor_tolerance, height, centered=(True, True, False))
             .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
             .translate([h['h_tran'][0], h['h_tran'][1], 0])
         )
@@ -189,7 +189,6 @@ if uploaded_file is not None:
     with open(raw_path, "wb") as f:
         f.write(uploaded_file.getvalue())
 
-    # Векторизация
     if filetype == "png":
         subprocess.run(f"convert {raw_path} -background white -alpha remove -alpha off {raw_path}", shell=True)
     if filetype != "svg":
@@ -198,10 +197,20 @@ if uploaded_file is not None:
     else:
         subprocess.run(f"cp {raw_path} file.svg", shell=True)
 
+    # Заранее генерируем DXF для точного определения габаритов
+    cur_scale = st.session_state['scale_val'] / 100.0
+    scale_val = 0.4 * cur_scale
+    with open("svg_to_dxf.scad", "w") as f:
+        f.write(f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg", center = true);')
+    subprocess.run("openscad svg_to_dxf.scad -o file.dxf", shell=True)
+
+    # Определяем реальный размер модели в миллиметрах
+    base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
+    bbox = base_model.combine().objects[0].BoundingBox()
+
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
     base_w = 600
     base_h = int(raw_img.height * (base_w / raw_img.width))
-    cur_scale = st.session_state['scale_val'] / 100.0
     c_width = int(base_w * cur_scale)
     c_height = int(base_h * cur_scale)
     bg_img = raw_img.resize((c_width, c_height))
@@ -219,36 +228,37 @@ if uploaded_file is not None:
             key="fixed_canvas"
         )
 
+    # Точная привязка пикселей мыши к миллиметрам CAD-модели
     hinges = []
     if canvas_result.json_data is not None:
         objects = canvas_result.json_data.get("objects", [])
         for obj in objects:
-            x1 = obj.get("x1")
-            y1 = obj.get("y1")
-            x2 = obj.get("x2")
-            y2 = obj.get("y2")
-            
-            if x1 is None or x2 is None:
-                x1 = obj.get("left", 0)
-                y1 = obj.get("top", 0)
-                x2 = x1 + obj.get("width", 0)
-                y2 = y1 + obj.get("height", 0)
+            x1 = obj.get("x1", obj.get("left", 0))
+            y1 = obj.get("y1", obj.get("top", 0))
+            x2 = obj.get("x2", x1 + obj.get("width", 0))
+            y2 = obj.get("y2", y1 + obj.get("height", 0))
 
-            cx = (x1 + x2) / 2.0 - (c_width / 2.0)
-            cy = -((y1 + y2) / 2.0 - (c_height / 2.0))
-            dx = x2 - x1
-            dy = -(y2 - y1)
-            length = math.sqrt(dx**2 + dy**2)
+            # Центр линии относительно центра холста
+            cx_canvas = (x1 + x2) / 2.0 - (c_width / 2.0)
+            cy_canvas = (y1 + y2) / 2.0 - (c_height / 2.0)
+
+            # Пропорциональный перевод в координаты детали
+            cq_x = cx_canvas * (bbox.xlen / c_width)
+            cq_y = -cy_canvas * (bbox.ylen / c_height)
+
+            dx = (x2 - x1) * (bbox.xlen / c_width)
+            dy = -(y2 - y1) * (bbox.ylen / c_height)
+            line_len = math.sqrt(dx**2 + dy**2)
             angle = math.degrees(math.atan2(dy, dx))
 
             hinges.append({
                 "type": hinge_type,
-                "h_tran": [cx * 0.4, cy * 0.4],
+                "h_tran": [cq_x, cq_y],
                 "h_rot": angle,
                 "h_break": 3.0,
-                "h_break_len": max(length * 0.4, 25.0),
+                "h_break_len": max(line_len * 1.5, bbox.ylen * 1.2),
                 "h_diam": st.session_state['height_val'],
-                "h_thick": 5.0,
+                "h_thick": max(st.session_state['height_val'] * 0.6, 4.0),
                 "h_expose": True
             })
 
@@ -259,23 +269,10 @@ if uploaded_file is not None:
             if len(hinges) == 0:
                 st.warning("Нарисуйте хотя бы одну линию на изображении!")
             else:
-                with st.spinner("Экструзия и вырезание шарниров..."):
+                with st.spinner("Вырезание шарниров..."):
                     current_height = st.session_state['height_val']
-                    scale_val = 0.4 * cur_scale
-
-                    # Создаем надежный .scad файл для конвертации в DXF
-                    scad_content = f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg", center = true);'
-                    with open("svg_to_dxf.scad", "w") as f:
-                        f.write(scad_content)
-
-                    # Запускаем OpenSCAD с выводом DXF
-                    subprocess.run("openscad svg_to_dxf.scad -o file.dxf", shell=True)
-
-                    if not os.path.exists("file.dxf"):
-                        st.error("Не удалось сгенерировать DXF-контур из картинки. Проверьте формат файла.")
-                        st.stop()
-
                     res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
+
                     for h in hinges:
                         if h["type"] == "normal":
                             res = normal_hinge(h, res, current_height)
