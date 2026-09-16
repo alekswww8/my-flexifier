@@ -5,7 +5,7 @@ import subprocess
 import time
 import cadquery as cq
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 
 hor_tolerance = 0.8
@@ -17,20 +17,20 @@ def cut_image(h, res, height):
     chamfer = h['h_break'] * chamfer_multi
     cut_im = (
         cq.Workplane('XY')
-        .box(h['h_break'], h['h_break_len'], height * 1.5, centered=(True, True, True))
+        .box(h['h_break'], h['h_break_len'], height, centered=(1, 1, 0))
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
-        .translate([h['h_tran'][0], h['h_tran'][1], height / 2])
+        .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     chamfer_top = (
         cq.Workplane('XY')
-        .box(chamfer, h['h_break_len'], chamfer, centered=(True, True, True))
+        .box(chamfer, h['h_break_len'], chamfer)
         .rotate([0, 0, 0], [0, 1, 0], 45)
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     chamfer_bot = (
         cq.Workplane('XY')
-        .box(chamfer, h['h_break_len'], chamfer, centered=(True, True, True))
+        .box(chamfer, h['h_break_len'], chamfer)
         .rotate([0, 0, 0], [0, 1, 0], 45)
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], height])
@@ -47,8 +47,8 @@ def normal_hinge(h, res, height):
     hole_h_im_x = (h['h_diam'] + pin_diam) / 2 + hor_tolerance
     hole_im = (
         cq.Workplane('XY')
-        .box(hole_h_im_x, h['h_thick'] + hor_tolerance * 2, height * 1.2, centered=(True, True, True))
-        .translate([-hole_h_im_x / 2 - h['h_break'] / 2, 0, height / 2])
+        .box(hole_h_im_x, h['h_thick'] + hor_tolerance * 2, height, centered=(1, 1, 0))
+        .translate([-hole_h_im_x / 2 - h['h_break'] / 2, 0, 0])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
@@ -57,28 +57,28 @@ def normal_hinge(h, res, height):
     hole_diam = pin_diam + vert_tolerance
     hinge_corn = (
         cq.Workplane('XZ')
-        .box(hole_h_im_x / 2 + chamfer * math.sqrt(2), h['h_diam'], h['h_thick'], centered=(False, False, True))
+        .box(hole_h_im_x / 2 + chamfer * math.sqrt(2), h['h_diam'], h['h_thick'], centered=(0, 0, 1))
         .translate([-h['h_break'] / 2 - pin_diam / 2, 0, height / 2 - h['h_diam'] / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_ext = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'], h['h_diam'] / 2, centered=(True, False, True))
+        .cylinder(h['h_thick'], h['h_diam'] / 2, centered=(1, 0, 1))
         .translate([x_hinge, 0, height / 2 - h['h_diam'] / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_hole = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'], hole_diam / 2, centered=(True, False, True))
+        .cylinder(h['h_thick'], hole_diam / 2, centered=(1, 0, 1))
         .translate([x_hinge, 0, height / 2 - hole_diam / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_pin = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'] + hor_tolerance * 2, pin_diam / 2, centered=(True, False, True))
+        .cylinder(h['h_thick'] + hor_tolerance * 2, pin_diam / 2, centered=(1, 0, 1))
         .translate([x_hinge, 0, height / 2 - pin_diam / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
@@ -107,7 +107,7 @@ def ball_joint(h, res, height):
     if h.get('h_expose', True):
         hole_join = (
             cq.Workplane('XY')
-            .box(h['h_break'] + (h['h_diam'] / 2 + hor_tolerance) * 2, h['h_diam'] / 2 + hor_tolerance, height, centered=(True, True, False))
+            .box(h['h_break'] + (h['h_diam'] / 2 + hor_tolerance) * 2, h['h_diam'] / 2 + hor_tolerance, height, centered=(1, 1, 0))
             .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
             .translate([h['h_tran'][0], h['h_tran'][1], 0])
         )
@@ -201,14 +201,12 @@ if uploaded_file is not None:
     cur_scale = st.session_state['scale_val'] / 100.0
     scale_val = 0.4 * cur_scale
     with open("svg_to_dxf.scad", "w") as f:
-        f.write(f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg");')
+        f.write(f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg", center = true);')
     subprocess.run("openscad svg_to_dxf.scad -o file.dxf", shell=True)
 
-    # Загружаем базовую геометрию и находим её реальный центр
+    # Загружаем базовую модель с center=true
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
-    center_x = (bbox.xmin + bbox.xmax) / 2.0
-    center_y = (bbox.ymin + bbox.ymax) / 2.0
 
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
     c_width = 600
@@ -237,28 +235,29 @@ if uploaded_file is not None:
             x2 = obj.get("x2", x1 + obj.get("width", 0))
             y2 = obj.get("y2", y1 + obj.get("height", 0))
 
-            # Нормализация координат мыши от 0.0 до 1.0 по ширине и высоте холста
-            u = ((x1 + x2) / 2.0) / c_width
-            v = ((y1 + y2) / 2.0) / c_height
+            # Перевод кликов холста относительно его центра (0, 0)
+            cx_pix = (x1 + x2) / 2.0 - (c_width / 2.0)
+            cy_pix = (y1 + y2) / 2.0 - (c_height / 2.0)
 
-            # Точный маппинг в Bounding Box модели
-            cq_x = bbox.xmin + u * bbox.xlen - center_x
-            cq_y = bbox.ymax - v * bbox.ylen - center_y
+            # Маппинг пикселей холста в миллиметры модели
+            cq_x = cx_pix * (bbox.xlen / c_width)
+            cq_y = -cy_pix * (bbox.ylen / c_height)
 
-            # Наклон линии
             dx = (x2 - x1) * (bbox.xlen / c_width)
             dy = -(y2 - y1) * (bbox.ylen / c_height)
             line_len = math.sqrt(dx**2 + dy**2)
-            angle = math.degrees(math.atan2(dy, dx)) - 90.0
+            
+            # В оригинале разрез вдоль Y соответствует повороту 0, вертикальный разрез:
+            angle = math.degrees(math.atan2(dx, dy))
 
             hinges.append({
                 "type": hinge_type,
                 "h_tran": [cq_x, cq_y],
                 "h_rot": angle,
                 "h_break": 3.0,
-                "h_break_len": max(line_len * 1.5, bbox.ylen * 1.5),
+                "h_break_len": max(line_len * 1.6, bbox.ylen * 1.5),
                 "h_diam": st.session_state['height_val'],
-                "h_thick": max(st.session_state['height_val'] * 0.5, 4.0),
+                "h_thick": 5.0,
                 "h_expose": True
             })
 
@@ -269,16 +268,9 @@ if uploaded_file is not None:
             if len(hinges) == 0:
                 st.warning("Нарисуйте хотя бы одну линию на изображении!")
             else:
-                with st.spinner("Сборка и вырезание шарниров..."):
+                with st.spinner("Вырезание шарниров..."):
                     current_height = st.session_state['height_val']
-                    # Центрируем базовую модель в (0, 0), чтобы она совпадала с координатами холста
-                    res = (
-                        cq.importers.importDXF("file.dxf")
-                        .wires()
-                        .toPending()
-                        .extrude(current_height)
-                        .translate([-center_x, -center_y, 0])
-                    )
+                    res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
 
                     for h in hinges:
                         if h["type"] == "normal":
@@ -292,7 +284,7 @@ if uploaded_file is not None:
 
                     with open(out_file, "rb") as f:
                         st.download_button(
-                            label=f"Скачать результат ({out_format.upper()})",
+                            label=f"💾 Скачать результат ({out_format.upper()})",
                             data=f,
                             file_name=out_file,
                             mime=f"model/{out_format}"
