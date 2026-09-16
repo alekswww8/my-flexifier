@@ -146,46 +146,45 @@ def ball_joint(h, res, height):
 
 
 st.set_page_config(layout="wide")
-st.title("Flexifier: Интерактивный редактор без слайдеров")
+st.title("Flexifier: Интерактивный редактор")
 
+# Инициализация хранилища
 if 'height_val' not in st.session_state:
     st.session_state['height_val'] = 8.0
-if 'scale_factors' not in st.session_state:
-    st.session_state['scale_factors'] = [1.0, 1.0]
+if 'scale_val' not in st.session_state:
+    st.session_state['scale_val'] = 100
+if 'detected_hinges' not in st.session_state:
+    st.session_state['detected_hinges'] = []
 
 col_settings, col_canvas = st.columns([1, 2])
 
 with col_settings:
     filetype = st.selectbox("Формат файла", ["png", "jpg", "jpeg", "svg"])
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
-    
-    st.write("**Размер изображения (мышь):**")
-    b_col1, b_col2 = st.columns(2)
-    with b_col1:
-        if st.button("🔍 Увеличить (+10%)"):
-            st.session_state['scale_factors'][0] *= 1.1
-            st.session_state['scale_factors'][1] *= 1.1
-            st.rerun()
-    with b_col2:
-        if st.button("🔎 Уменьшить (-10%)"):
-            st.session_state['scale_factors'][0] = max(0.2, st.session_state['scale_factors'][0] * 0.9)
-            st.session_state['scale_factors'][1] = max(0.2, st.session_state['scale_factors'][1] * 0.9)
-            st.rerun()
+    hinge_type = st.selectbox("Тип шарнира", ["normal", "ball"])
 
-    st.write(f"Текущий масштаб: **{int(st.session_state['scale_factors'][0] * 100)}%**")
+    st.write(f"**Размер картинки:** {st.session_state['scale_val']}%")
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        if st.button("🔍 Больше (+20%)"):
+            st.session_state['scale_val'] = min(400, st.session_state['scale_val'] + 20)
+            st.rerun()
+    with sc2:
+        if st.button("🔎 Меньше (-20%)"):
+            st.session_state['scale_val'] = max(20, st.session_state['scale_val'] - 20)
+            st.rerun()
 
     st.write(f"**Толщина детали (Z):** {st.session_state['height_val']:.1f} мм")
-    h_b1, h_b2 = st.columns(2)
-    with h_b1:
-        if st.button("➖ Тоньше"):
+    hb1, hb2 = st.columns(2)
+    with hb1:
+        if st.button("➖ Тоньше (-1 мм)"):
             st.session_state['height_val'] = max(2.0, st.session_state['height_val'] - 1.0)
             st.rerun()
-    with h_b2:
-        if st.button("➕ Толще"):
+    with hb2:
+        if st.button("➕ Толще (+1 мм)"):
             st.session_state['height_val'] = min(50.0, st.session_state['height_val'] + 1.0)
             st.rerun()
 
-    hinge_type = st.selectbox("Тип шарнира", ["normal", "ball"])
     uploaded_file = st.file_uploader("Загрузите файл", type=[filetype])
 
 if uploaded_file is not None:
@@ -201,29 +200,48 @@ if uploaded_file is not None:
     else:
         subprocess.run(f"cp {raw_path} file.svg", shell=True)
 
-    c_width, c_height = 650, 450
-    bg_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
+    raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
+    
+    # Расчет размера под масштаб
+    base_w = 600
+    base_h = int(raw_img.height * (base_w / raw_img.width))
+    cur_scale = st.session_state['scale_val'] / 100.0
+    c_width = int(base_w * cur_scale)
+    c_height = int(base_h * cur_scale)
+    bg_img = raw_img.resize((c_width, c_height))
 
     with col_canvas:
-        st.info("✏️ **Проводите красные линии мышкой** поперёк детали там, где должны быть шарниры:")
+        st.info("✏️ **Проведите линии мышкой** поперёк детали в местах шарниров:")
         canvas_result = st_canvas(
             stroke_width=4,
             stroke_color="#FF0000",
             background_image=bg_img,
-            update_streamlit=True,
+            update_streamlit=False,  # Отправляет данные по кнопке, избегая подвисания
             height=c_height,
             width=c_width,
             drawing_mode="line",
-            key="canvas_draw_lines"
+            key="fixed_canvas"
         )
 
-    # Сбор линий шарниров
-    hinges = []
-    if canvas_result.json_data is not None:
-        for obj in canvas_result.json_data.get("objects", []):
+        c_b1, c_b2 = st.columns(2)
+        with c_b1:
+            save_lines = st.button("✅ Сохранить нарисованные линии", use_container_width=True)
+        with c_b2:
+            if st.button("🗑️ Сбросить всё", use_container_width=True):
+                st.session_state['detected_hinges'] = []
+                st.rerun()
+
+    # Считывание координат при нажатии на кнопку подтверждения
+    if save_lines and canvas_result.json_data is not None:
+        new_hinges = []
+        objects = canvas_result.json_data.get("objects", [])
+        for obj in objects:
             if obj.get("type") == "line":
-                x1, y1 = obj["left"], obj["top"]
-                x2, y2 = x1 + obj["width"], y1 + obj["height"]
+                x1 = obj.get("x1", obj.get("left", 0))
+                y1 = obj.get("y1", obj.get("top", 0))
+                x2 = obj.get("x2", x1 + obj.get("width", 0))
+                y2 = obj.get("y2", y1 + obj.get("height", 0))
+
                 cx = (x1 + x2) / 2.0 - (c_width / 2.0)
                 cy = -((y1 + y2) / 2.0 - (c_height / 2.0))
                 dx = x2 - x1
@@ -231,7 +249,7 @@ if uploaded_file is not None:
                 length = math.sqrt(dx**2 + dy**2)
                 angle = math.degrees(math.atan2(dy, dx))
 
-                hinges.append({
+                new_hinges.append({
                     "type": hinge_type,
                     "h_tran": [cx * 0.4, cy * 0.4],
                     "h_rot": angle,
@@ -241,34 +259,40 @@ if uploaded_file is not None:
                     "h_thick": 5.0,
                     "h_expose": True
                 })
+        st.session_state['detected_hinges'] = new_hinges
+        st.rerun()
+
+    hinges = st.session_state['detected_hinges']
 
     with col_settings:
         st.write(f"Шарниров нарисовано: **{len(hinges)}**")
 
-        if st.button("🚀 Собрать модель", disabled=(len(hinges) == 0)):
-            with st.spinner("Экструзия и вырезание шарниров..."):
-                current_height = st.session_state['height_val']
-                scale_x = 0.4 * st.session_state['scale_factors'][0]
-                scale_y = 0.4 * st.session_state['scale_factors'][1]
+        if st.button("🚀 Собрать модель"):
+            if len(hinges) == 0:
+                st.warning("Сначала нарисуйте линии и нажмите кнопку «Сохранить нарисованные линии»!")
+            else:
+                with st.spinner("Экструзия и вырезание шарниров..."):
+                    current_height = st.session_state['height_val']
+                    scale_val = 0.4 * cur_scale
 
-                scad_code = f'scale([{scale_x}, {scale_y}, 1]) import("file.svg", center=true);'
-                subprocess.run(f'openscad -e \'{scad_code}\' -o file.dxf', shell=True)
+                    scad_code = f'scale([{scale_val}, {scale_val}, 1]) import("file.svg", center=true);'
+                    subprocess.run(f'openscad -e \'{scad_code}\' -o file.dxf', shell=True)
 
-                res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
-                for h in hinges:
-                    if h["type"] == "normal":
-                        res = normal_hinge(h, res, current_height)
-                    else:
-                        res = ball_joint(h, res, current_height)
+                    res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
+                    for h in hinges:
+                        if h["type"] == "normal":
+                            res = normal_hinge(h, res, current_height)
+                        else:
+                            res = ball_joint(h, res, current_height)
 
-                out_file = f"result.{out_format}"
-                cq.exporters.export(res, out_file)
-                st.success("Готово!")
+                    out_file = f"result.{out_format}"
+                    cq.exporters.export(res, out_file)
+                    st.success("Готово!")
 
-                with open(out_file, "rb") as f:
-                    st.download_button(
-                        label=f"Скачать результат ({out_format.upper()})",
-                        data=f,
-                        file_name=out_file,
-                        mime=f"model/{out_format}"
-                    )
+                    with open(out_file, "rb") as f:
+                        st.download_button(
+                            label=f"Скачать результат ({out_format.upper()})",
+                            data=f,
+                            file_name=out_file,
+                            mime=f"model/{out_format}"
+                        )
