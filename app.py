@@ -6,6 +6,7 @@ import time
 import cadquery as cq
 import streamlit as st
 from PIL import Image, ImageDraw
+from streamlit_drawable_canvas import st_canvas
 
 hor_tolerance = 0.8
 vert_tolerance = 0.8
@@ -204,13 +205,12 @@ if uploaded_file is not None:
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
 
-    # Размеры интерактивного поля
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
     c_width = 560
     c_height = int(raw_img.height * (c_width / raw_img.width))
     bg_img = raw_img.resize((c_width, c_height))
 
-    # ДВЕ КОЛОНКИ НА ОДНОМ УРОВНЕ
+    # ДВЕ КОЛОНКИ НА ОДНОМ ГОРИЗОНТАЛЬНОМ УРОВНЕ
     col_ctrl, col_canvas = st.columns([1, 1.2])
 
     with col_ctrl:
@@ -223,7 +223,7 @@ if uploaded_file is not None:
         cur_h = st.session_state['hinge_list'][h_idx]
         cur_h['type'] = st.selectbox("Тип соединения:", ["normal", "ball"], index=0 if cur_h['type'] == 'normal' else 1)
 
-        st.info("👉 **Кликните прямо по фигуре на картинке справа** — центр шарнира перепрыгнет в точку клика.")
+        st.info("👉 **Кликните прямо по фигуре на картинке справа** — шарнир переместится в эту точку.")
 
         st.markdown(f"**Координаты:** X = `{cur_h['x']:.1f} мм`, Y = `{cur_h['y']:.1f} мм`")
 
@@ -254,8 +254,8 @@ if uploaded_file is not None:
 
     with col_canvas:
         st.subheader("Интерактивная карта (кликните мышкой)")
-        
-        # Рисуем шарниры прямо на изображении, чтобы холст не блокировал клики
+
+        # Наносим линии шарниров на изображение
         img_with_overlay = bg_img.copy()
         draw = ImageDraw.Draw(img_with_overlay)
 
@@ -267,16 +267,14 @@ if uploaded_file is not None:
             line_color = (255, 0, 0, 255) if is_cur else (0, 85, 255, 255)
             dot_color = (255, 255, 0, 255) if is_cur else (255, 255, 255, 255)
 
-            # Наклонная линия реза
             rad = math.radians(h['rot'])
             dx = math.sin(rad) * 60
             dy = math.cos(rad) * 60
             draw.line([(px - dx, py - dy), (px + dx, py + dy)], fill=line_color, width=5)
-            # Центральный маркер
             draw.ellipse([(px - 8, py - 8), (px + 8, py + 8)], fill=dot_color, outline=(0, 0, 0, 255), width=2)
 
         canvas_result = st_canvas(
-            fill_color="rgba(255, 165, 0, 0.3)",
+            fill_color="rgba(255, 0, 0, 0.4)",
             stroke_width=2,
             stroke_color="#FF0000",
             background_image=img_with_overlay,
@@ -284,11 +282,11 @@ if uploaded_file is not None:
             height=c_height,
             width=c_width,
             drawing_mode="point",
-            point_display_radius=0,
-            key=f"click_canvas_{h_idx}_{len(st.session_state['hinge_list'])}"
+            point_display_radius=5,
+            key=f"canvas_interactive_{h_idx}"
         )
 
-        # Мгновенная реакция на клик мыши
+        # Считывание координат клика
         if canvas_result.json_data is not None:
             objs = canvas_result.json_data.get("objects", [])
             if objs:
@@ -296,10 +294,13 @@ if uploaded_file is not None:
                 click_x = last_obj.get("left", 0)
                 click_y = last_obj.get("top", 0)
 
-                # Перевод точки клика в координаты детали
-                cur_h['x'] = ((click_x / c_width) - 0.5) * bbox.xlen
-                cur_h['y'] = -((click_y / c_height) - 0.5) * bbox.ylen
-                st.rerun()
+                new_x = ((click_x / c_width) - 0.5) * bbox.xlen
+                new_y = -((click_y / c_height) - 0.5) * bbox.ylen
+
+                if abs(new_x - cur_h['x']) > 1.0 or abs(new_y - cur_h['y']) > 1.0:
+                    cur_h['x'] = new_x
+                    cur_h['y'] = new_y
+                    st.rerun()
 
     if build_btn:
         with st.spinner("Сборка 3D-модели в CadQuery..."):
