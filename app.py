@@ -158,7 +158,7 @@ col_settings, col_canvas = st.columns([1, 2])
 with col_settings:
     filetype = st.selectbox("Формат файла", ["jpg", "png", "jpeg", "svg"])
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
-    hinge_type = st.selectbox("Тип шарнира", ["ball", "normal"])
+    hinge_type = st.selectbox("Тип шарнира", ["normal", "ball"])
 
     st.write(f"**Размер картинки:** {st.session_state['scale_val']}%")
     sc1, sc2 = st.columns(2)
@@ -189,6 +189,7 @@ if uploaded_file is not None:
     with open(raw_path, "wb") as f:
         f.write(uploaded_file.getvalue())
 
+    # Векторизация
     if filetype == "png":
         subprocess.run(f"convert {raw_path} -background white -alpha remove -alpha off {raw_path}", shell=True)
     if filetype != "svg":
@@ -203,6 +204,7 @@ if uploaded_file is not None:
         f.write(f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg", center = true);')
     subprocess.run("openscad svg_to_dxf.scad -o file.dxf", shell=True)
 
+    # Получаем реальные габариты центрированной детали
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
 
@@ -221,7 +223,7 @@ if uploaded_file is not None:
             height=c_height,
             width=c_width,
             drawing_mode="line",
-            key="aligned_canvas"
+            key="fixed_canvas"
         )
 
     hinges = []
@@ -233,17 +235,17 @@ if uploaded_file is not None:
             x2 = obj.get("x2", x1 + obj.get("width", 0))
             y2 = obj.get("y2", y1 + obj.get("height", 0))
 
-            # Позиция центра линии от 0.0 до 1.0 внутри изображения
-            u = ((x1 + x2) / 2.0) / c_width
-            v = ((y1 + y2) / 2.0) / c_height
+            # Позиция центра линии относительно центра холста: от -0.5 до +0.5
+            norm_cx = ((x1 + x2) / 2.0 / c_width) - 0.5
+            norm_cy = ((y1 + y2) / 2.0 / c_height) - 0.5
 
-            # Точный маппинг в диапазон [xmin, xmax] и [ymin, ymax]
-            cq_x = bbox.xmin + u * (bbox.xmax - bbox.xmin)
-            cq_y = bbox.ymax - v * (bbox.ymax - bbox.ymin)
+            # Перевод в координаты CadQuery относительно точки (0, 0)
+            cq_x = norm_cx * bbox.xlen
+            cq_y = -norm_cy * bbox.ylen
 
-            # Расчет угла (вертикальная линия сверху вниз дает угол 0 градусов)
-            dx = (x2 - x1)
-            dy = (y2 - y1)
+            # Угол поворота: вертикальная линия сверху вниз должна давать угол 0.0
+            dx = x2 - x1
+            dy = y2 - y1
             angle = math.degrees(math.atan2(dx, dy))
 
             hinges.append({
@@ -251,7 +253,7 @@ if uploaded_file is not None:
                 "h_tran": [cq_x, cq_y],
                 "h_rot": angle,
                 "h_break": 3.0,
-                "h_break_len": bbox.ylen * 2.0,
+                "h_break_len": bbox.ylen * 1.5,
                 "h_diam": st.session_state['height_val'],
                 "h_thick": 5.0,
                 "h_expose": True
@@ -264,7 +266,7 @@ if uploaded_file is not None:
             if len(hinges) == 0:
                 st.warning("Нарисуйте хотя бы одну линию на изображении!")
             else:
-                with st.spinner("Вырезание шарниров..."):
+                with st.spinner("Сборка модели и вырезание шарниров..."):
                     current_height = st.session_state['height_val']
                     res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
 
