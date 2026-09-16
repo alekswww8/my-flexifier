@@ -150,26 +150,42 @@ st.title("Flexifier: Интерактивный редактор без слай
 
 if 'height_val' not in st.session_state:
     st.session_state['height_val'] = 8.0
+if 'scale_factors' not in st.session_state:
+    st.session_state['scale_factors'] = [1.0, 1.0]
 
 col_settings, col_canvas = st.columns([1, 2])
 
 with col_settings:
     filetype = st.selectbox("Формат файла", ["png", "jpg", "jpeg", "svg"])
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
-    tool_mode = st.radio("Действие мыши на поле:", ["Масштабирование (рамка)", "Рисование шарниров (линии)"])
-    hinge_type = st.selectbox("Тип шарнира", ["normal", "ball"])
+    
+    st.write("**Размер изображения (мышь):**")
+    b_col1, b_col2 = st.columns(2)
+    with b_col1:
+        if st.button("🔍 Увеличить (+10%)"):
+            st.session_state['scale_factors'][0] *= 1.1
+            st.session_state['scale_factors'][1] *= 1.1
+            st.rerun()
+    with b_col2:
+        if st.button("🔎 Уменьшить (-10%)"):
+            st.session_state['scale_factors'][0] = max(0.2, st.session_state['scale_factors'][0] * 0.9)
+            st.session_state['scale_factors'][1] = max(0.2, st.session_state['scale_factors'][1] * 0.9)
+            st.rerun()
+
+    st.write(f"Текущий масштаб: **{int(st.session_state['scale_factors'][0] * 100)}%**")
 
     st.write(f"**Толщина детали (Z):** {st.session_state['height_val']:.1f} мм")
     h_b1, h_b2 = st.columns(2)
     with h_b1:
-        if st.button("➖ Уменьшить толщину"):
+        if st.button("➖ Тоньше"):
             st.session_state['height_val'] = max(2.0, st.session_state['height_val'] - 1.0)
             st.rerun()
     with h_b2:
-        if st.button("➕ Увеличить толщину"):
+        if st.button("➕ Толще"):
             st.session_state['height_val'] = min(50.0, st.session_state['height_val'] + 1.0)
             st.rerun()
 
+    hinge_type = st.selectbox("Тип шарнира", ["normal", "ball"])
     uploaded_file = st.file_uploader("Загрузите файл", type=[filetype])
 
 if uploaded_file is not None:
@@ -188,59 +204,18 @@ if uploaded_file is not None:
     c_width, c_height = 650, 450
     bg_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
 
-    # Исходная рамка масштабирования
-    init_drawing = {
-        "version": "4.4.0",
-        "objects": [{
-            "type": "rect",
-            "left": 100,
-            "top": 50,
-            "width": 300,
-            "height": 300,
-            "fill": "rgba(0, 150, 255, 0.15)",
-            "stroke": "#0066FF",
-            "strokeWidth": 2
-        }]
-    }
-
     with col_canvas:
-        if tool_mode == "Масштабирование (рамка)":
-            st.info("👆 **Тяните за углы синей рамки мышью**, чтобы уменьшить или увеличить модель.")
-            canvas_result = st_canvas(
-                fill_color="rgba(0, 150, 255, 0.15)",
-                stroke_width=2,
-                stroke_color="#0066FF",
-                background_image=bg_img,
-                update_streamlit=True,
-                height=c_height,
-                width=c_width,
-                drawing_mode="rect",
-                initial_drawing=init_drawing,
-                key="canvas_rect"
-            )
-        else:
-            st.info("✏️ **Проведите линии разрезов мышкой** в местах, где должны гнуться шарниры.")
-            canvas_result = st_canvas(
-                stroke_width=3,
-                stroke_color="#FF0000",
-                background_image=bg_img,
-                update_streamlit=True,
-                height=c_height,
-                width=c_width,
-                drawing_mode="line",
-                key="canvas_lines"
-            )
-
-    # Получение масштаба из рамки
-    scale_factor_x = 1.0
-    scale_factor_y = 1.0
-    if canvas_result.json_data is not None:
-        for obj in canvas_result.json_data.get("objects", []):
-            if obj.get("type") == "rect":
-                w = obj.get("width", 300) * obj.get("scaleX", 1.0)
-                h = obj.get("height", 300) * obj.get("scaleY", 1.0)
-                scale_factor_x = w / 300.0
-                scale_factor_y = h / 300.0
+        st.info("✏️ **Проводите красные линии мышкой** поперёк детали там, где должны быть шарниры:")
+        canvas_result = st_canvas(
+            stroke_width=4,
+            stroke_color="#FF0000",
+            background_image=bg_img,
+            update_streamlit=True,
+            height=c_height,
+            width=c_width,
+            drawing_mode="line",
+            key="canvas_draw_lines"
+        )
 
     # Сбор линий шарниров
     hinges = []
@@ -268,14 +243,15 @@ if uploaded_file is not None:
                 })
 
     with col_settings:
-        st.write(f"Масштаб по ширине (X): **{int(scale_factor_x * 100)}%**")
-        st.write(f"Масштаб по длине (Y): **{int(scale_factor_y * 100)}%**")
         st.write(f"Шарниров нарисовано: **{len(hinges)}**")
 
-        if st.button("🚀 Собрать модель"):
-            with st.spinner("Экструзия и расчет геометрии..."):
+        if st.button("🚀 Собрать модель", disabled=(len(hinges) == 0)):
+            with st.spinner("Экструзия и вырезание шарниров..."):
                 current_height = st.session_state['height_val']
-                scad_code = f'scale([{0.4 * scale_factor_x}, {0.4 * scale_factor_y}, 1]) import("file.svg", center=true);'
+                scale_x = 0.4 * st.session_state['scale_factors'][0]
+                scale_y = 0.4 * st.session_state['scale_factors'][1]
+
+                scad_code = f'scale([{scale_x}, {scale_y}, 1]) import("file.svg", center=true);'
                 subprocess.run(f'openscad -e \'{scad_code}\' -o file.dxf', shell=True)
 
                 res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
