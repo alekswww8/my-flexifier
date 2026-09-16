@@ -197,14 +197,12 @@ if uploaded_file is not None:
     else:
         subprocess.run(f"cp {raw_path} file.svg", shell=True)
 
-    # Заранее генерируем DXF для точного определения габаритов
     cur_scale = st.session_state['scale_val'] / 100.0
     scale_val = 0.4 * cur_scale
     with open("svg_to_dxf.scad", "w") as f:
         f.write(f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg", center = true);')
     subprocess.run("openscad svg_to_dxf.scad -o file.dxf", shell=True)
 
-    # Определяем реальный размер модели в миллиметрах
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
 
@@ -228,7 +226,6 @@ if uploaded_file is not None:
             key="fixed_canvas"
         )
 
-    # Точная привязка пикселей мыши к миллиметрам CAD-модели
     hinges = []
     if canvas_result.json_data is not None:
         objects = canvas_result.json_data.get("objects", [])
@@ -238,27 +235,26 @@ if uploaded_file is not None:
             x2 = obj.get("x2", x1 + obj.get("width", 0))
             y2 = obj.get("y2", y1 + obj.get("height", 0))
 
-            # Центр линии относительно центра холста
-            cx_canvas = (x1 + x2) / 2.0 - (c_width / 2.0)
-            cy_canvas = (y1 + y2) / 2.0 - (c_height / 2.0)
+            # Перевод координат от центра изображения к CAD-центру детали
+            norm_x = (x1 + x2) / 2.0 / c_width - 0.5
+            norm_y = (y1 + y2) / 2.0 / c_height - 0.5
 
-            # Пропорциональный перевод в координаты детали
-            cq_x = cx_canvas * (bbox.xlen / c_width)
-            cq_y = -cy_canvas * (bbox.ylen / c_height)
+            cq_x = norm_x * bbox.xlen + (bbox.xmin + bbox.xmax) / 2.0
+            cq_y = -norm_y * bbox.ylen + (bbox.ymin + bbox.ymax) / 2.0
 
             dx = (x2 - x1) * (bbox.xlen / c_width)
             dy = -(y2 - y1) * (bbox.ylen / c_height)
             line_len = math.sqrt(dx**2 + dy**2)
-            angle = math.degrees(math.atan2(dy, dx))
+            angle = math.degrees(math.atan2(dy, dx)) - 90.0
 
             hinges.append({
                 "type": hinge_type,
                 "h_tran": [cq_x, cq_y],
                 "h_rot": angle,
                 "h_break": 3.0,
-                "h_break_len": max(line_len * 1.5, bbox.ylen * 1.2),
+                "h_break_len": max(line_len * 1.6, bbox.ylen * 1.5),
                 "h_diam": st.session_state['height_val'],
-                "h_thick": max(st.session_state['height_val'] * 0.6, 4.0),
+                "h_thick": max(st.session_state['height_val'] * 0.5, 4.0),
                 "h_expose": True
             })
 
