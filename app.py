@@ -156,7 +156,7 @@ col_settings, col_canvas = st.columns([1, 2])
 with col_settings:
     filetype = st.selectbox("Формат файла", ["png", "jpg", "jpeg", "svg"])
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
-    tool_mode = st.radio("Действие мыши на поле:", ["Трансформация (размер и позиция)", "Рисование шарниров (линии)"])
+    tool_mode = st.radio("Действие мыши на поле:", ["Масштабирование (рамка)", "Рисование шарниров (линии)"])
     hinge_type = st.selectbox("Тип шарнира", ["normal", "ball"])
 
     st.write(f"**Толщина детали (Z):** {st.session_state['height_val']:.1f} мм")
@@ -188,7 +188,7 @@ if uploaded_file is not None:
     c_width, c_height = 650, 450
     bg_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
 
-    # Исходная рамка масштабирования при первой загрузке
+    # Исходная рамка масштабирования
     init_drawing = {
         "version": "4.4.0",
         "objects": [{
@@ -204,7 +204,7 @@ if uploaded_file is not None:
     }
 
     with col_canvas:
-        if tool_mode == "Трансформация (размер и позиция)":
+        if tool_mode == "Масштабирование (рамка)":
             st.info("👆 **Тяните за углы синей рамки мышью**, чтобы уменьшить или увеличить модель.")
             canvas_result = st_canvas(
                 fill_color="rgba(0, 150, 255, 0.15)",
@@ -214,9 +214,9 @@ if uploaded_file is not None:
                 update_streamlit=True,
                 height=c_height,
                 width=c_width,
-                drawing_mode="transform",
+                drawing_mode="rect",
                 initial_drawing=init_drawing,
-                key="canvas_transform"
+                key="canvas_rect"
             )
         else:
             st.info("✏️ **Проведите линии разрезов мышкой** в местах, где должны гнуться шарниры.")
@@ -231,7 +231,7 @@ if uploaded_file is not None:
                 key="canvas_lines"
             )
 
-    # Получение масштаба из рамки трансформации
+    # Получение масштаба из рамки
     scale_factor_x = 1.0
     scale_factor_y = 1.0
     if canvas_result.json_data is not None:
@@ -275,7 +275,6 @@ if uploaded_file is not None:
         if st.button("🚀 Собрать модель"):
             with st.spinner("Экструзия и расчет геометрии..."):
                 current_height = st.session_state['height_val']
-                # Генерация DXF с учетом масштабирования рамки
                 scad_code = f'scale([{0.4 * scale_factor_x}, {0.4 * scale_factor_y}, 1]) import("file.svg", center=true);'
                 subprocess.run(f'openscad -e \'{scad_code}\' -o file.dxf', shell=True)
 
