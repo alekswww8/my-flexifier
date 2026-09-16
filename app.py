@@ -6,6 +6,7 @@ import time
 import cadquery as cq
 import streamlit as st
 from PIL import Image
+from streamlit_drawable_canvas import st_canvas
 
 hor_tolerance = 0.8
 vert_tolerance = 0.8
@@ -148,23 +149,15 @@ st.set_page_config(layout="wide")
 
 if 'height_val' not in st.session_state:
     st.session_state['height_val'] = 8.0
-if 'hinge_list' not in st.session_state:
-    st.session_state['hinge_list'] = [
-        {'x': -25.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'},
-        {'x': 0.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'},
-        {'x': 25.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'}
-    ]
-if 'cur_h_idx' not in st.session_state:
-    st.session_state['cur_h_idx'] = 0
 
-# Боковая панель для общих настроек
 with st.sidebar:
     st.title("⚙️ Настройки")
     filetype = st.selectbox("Формат файла", ["jpg", "png", "jpeg", "svg"])
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
+    hinge_type = st.selectbox("Тип соединения:", ["normal", "ball"])
     uploaded_file = st.file_uploader("Загрузите файл", type=[filetype])
 
-    st.write(f"**Толщина детали:** {st.session_state['height_val']:.1f} мм")
+    st.write(f"**Толщина детали (Z):** {st.session_state['height_val']:.1f} мм")
     hb1, hb2 = st.columns(2)
     with hb1:
         if st.button("➖ Тоньше"):
@@ -198,133 +191,100 @@ if uploaded_file is not None:
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
 
-    # Две колонки строго на одном уровне вверху экрана
-    col_ctrl, col_img = st.columns([1, 1.2])
+    # Масштабируем картинку под ширину холста
+    raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
+    c_width = 560
+    c_height = int(raw_img.height * (c_width / raw_img.width))
+    bg_img = raw_img.resize((c_width, c_height))
 
-    with col_ctrl:
-        st.subheader("Управление шарнирами")
-        h_options = [f"Шарнир №{i+1}" for i in range(len(st.session_state['hinge_list']))]
-        selected = st.selectbox("Активный шарнир:", h_options, index=st.session_state['cur_h_idx'])
-        h_idx = h_options.index(selected)
-        st.session_state['cur_h_idx'] = h_idx
+    col_canvas, col_build = st.columns([1.2, 0.8])
 
-        cur_h = st.session_state['hinge_list'][h_idx]
-        cur_h['type'] = st.selectbox("Тип шарнира:", ["normal", "ball"], index=0 if cur_h['type'] == 'normal' else 1)
+    # Подготавливаем готовые линии для перетаскивания мышкой
+    initial_objects = [
+        {"type": "line", "left": int(c_width * 0.35), "top": int(c_height * 0.2), "width": 0, "height": int(c_height * 0.6), "stroke": "#FF0000", "strokeWidth": 6},
+        {"type": "line", "left": int(c_width * 0.55), "top": int(c_height * 0.2), "width": 0, "height": int(c_height * 0.6), "stroke": "#0055FF", "strokeWidth": 6},
+        {"type": "line", "left": int(c_width * 0.75), "top": int(c_height * 0.2), "width": 0, "height": int(c_height * 0.6), "stroke": "#00AA00", "strokeWidth": 6}
+    ]
 
-        st.markdown(f"**X:** `{cur_h['x']:.1f} мм` | **Y:** `{cur_h['y']:.1f} мм` | **Угол:** `{cur_h['rot']:.0f}°`")
-
-        # Кнопки перемещения
-        st.write("Смещение:")
-        p1, p2, p3, p4 = st.columns(4)
-        with p1:
-            if st.button("⬅️ -5мм"):
-                cur_h['x'] -= 5.0
-                st.rerun()
-        with p2:
-            if st.button("➡️ +5мм"):
-                cur_h['x'] += 5.0
-                st.rerun()
-        with p3:
-            if st.button("⬇️ Вниз"):
-                cur_h['y'] -= 5.0
-                st.rerun()
-        with p4:
-            if st.button("⬆️ Вверх"):
-                cur_h['y'] += 5.0
-                st.rerun()
-
-        # Поворот
-        st.write("Поворот:")
-        r1, r2 = st.columns(2)
-        with r1:
-            if st.button("🔄 -15°"):
-                cur_h['rot'] -= 15.0
-                st.rerun()
-        with r2:
-            if st.button("🔁 +15°"):
-                cur_h['rot'] += 15.0
-                st.rerun()
-
-        st.write("---")
-        add_c, rem_c = st.columns(2)
-        with add_c:
-            if st.button("➕ Добавить"):
-                st.session_state['hinge_list'].append({'x': 0.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'})
-                st.rerun()
-        with rem_c:
-            if st.button("🗑️ Удалить", disabled=(len(st.session_state['hinge_list']) <= 1)):
-                st.session_state['hinge_list'].pop(h_idx)
-                st.session_state['cur_h_idx'] = 0
-                st.rerun()
-
-        st.write("---")
-        build_btn = st.button("🚀 Собрать модель (STL/STEP)", use_container_width=True)
-
-    # Генерация предпросмотра
-    scad_parts = []
-    for i, h in enumerate(st.session_state['hinge_list']):
-        is_active = (i == h_idx)
-        bar_col = "red" if is_active else "navy"
-        dot_col = "yellow" if is_active else "white"
-        scad_parts.append(
-            f'''
-            translate([{h["x"]}, {h["y"]}, 0]) rotate([0, 0, {h["rot"]}]) {{
-                color("{bar_col}") linear_extrude({st.session_state["height_val"] * 1.3}) square([3, {bbox.ylen * 1.5}], center=true);
-                color("{dot_col}") translate([0, 0, {st.session_state["height_val"]}]) cylinder(d={st.session_state["height_val"] * 1.2}, h=2, center=true);
-            }}
-            '''
+    with col_canvas:
+        st.subheader("🖱️ Интерактивный редактор разрезов")
+        st.info("💡 **Кликните на цветную линию мышкой** и перетащите её вверх, вниз, влево или вправо. Кружок по центру линии — это ось петли.")
+        
+        canvas_result = st_canvas(
+            stroke_width=6,
+            stroke_color="#FF0000",
+            background_image=bg_img,
+            initial_drawing={"version": "4.4.0", "objects": initial_objects},
+            update_streamlit=True,
+            height=c_height,
+            width=c_width,
+            drawing_mode="transform",  # Режим трансформации и перетаскивания существующих линий мышкой
+            key="drag_canvas"
         )
 
-    preview_code = f"""
-    $fn=25;
-    color("lightgreen") linear_extrude({st.session_state['height_val']}) import("file.dxf");
-    {' '.join(scad_parts)}
-    """
-    with open("live_preview.scad", "w") as f:
-        f.write(preview_code)
+    # Считывание положений линий прямо с холста
+    hinges = []
+    if canvas_result.json_data is not None:
+        objects = canvas_result.json_data.get("objects", [])
+        for obj in objects:
+            if obj.get("type") == "line":
+                left = obj.get("left", 0)
+                top = obj.get("top", 0)
+                width = obj.get("width", 0) * obj.get("scaleX", 1)
+                height_box = obj.get("height", 0) * obj.get("scaleY", 1)
 
-    subprocess.run(
-        "xvfb-run -a openscad -o live_preview.png --autocenter --viewall --projection=ortho live_preview.scad",
-        shell=True
-    )
+                # Точные координаты середины отрезка (где ставится петля)
+                mid_x = left + width / 2.0
+                mid_y = top + height_box / 2.0
 
-    with col_img:
-        st.subheader("Предпросмотр")
-        if os.path.exists("live_preview.png"):
-            st.image("live_preview.png", caption="🟡 Желтый диск — активный шарнир | ⚪ Белый — остальные", use_container_width=True)
+                # Центрирование относительно точки (0, 0) модели
+                cq_x = ((mid_x / c_width) - 0.5) * bbox.xlen
+                cq_y = -((mid_y / c_height) - 0.5) * bbox.ylen
 
-    if build_btn:
-        with st.spinner("Генерация CAD-модели..."):
-            current_height = st.session_state['height_val']
-            res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
+                # Угол наклона линии
+                angle = obj.get("angle", 0)
+                if width != 0 and height_box != 0:
+                    angle += math.degrees(math.atan2(width, height_box))
 
-            for h in st.session_state['hinge_list']:
-                h_dict = {
-                    "type": h["type"],
-                    "h_tran": [h["x"], h["y"]],
-                    "h_rot": h["rot"],
+                hinges.append({
+                    "type": hinge_type,
+                    "h_tran": [cq_x, cq_y],
+                    "h_rot": angle,
                     "h_break": 3.0,
-                    "h_break_len": bbox.ylen * 2.0,
-                    "h_diam": current_height,
+                    "h_break_len": max(height_box * (bbox.ylen / c_height) * 1.3, bbox.ylen * 1.5),
+                    "h_diam": st.session_state['height_val'],
                     "h_thick": 5.0,
                     "h_expose": True
-                }
-                if h["type"] == "normal":
-                    res = normal_hinge(h_dict, res, current_height)
-                else:
-                    res = ball_joint(h_dict, res, current_height)
+                })
 
-            out_file = f"result.{out_format}"
-            cq.exporters.export(res, out_file)
-            st.success("Готово!")
+    with col_build:
+        st.subheader("Сборка детали")
+        st.write(f"Обнаружено шарниров: **{len(hinges)}**")
+        for i, h in enumerate(hinges):
+            st.write(f"• Разрез №{i+1}: X = `{h['h_tran'][0]:.1f}` мм, Y = `{h['h_tran'][1]:.1f}` мм")
 
-            with open(out_file, "rb") as f:
-                st.download_button(
-                    label=f"💾 Скачать {out_format.upper()}",
-                    data=f,
-                    file_name=out_file,
-                    mime=f"model/{out_format}",
-                    use_container_width=True
-                )
+        if st.button("🚀 Собрать модель (STL/STEP)", use_container_width=True):
+            with st.spinner("Вырезание шарниров и сборка 3D-модели..."):
+                current_height = st.session_state['height_val']
+                res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
+
+                for h in hinges:
+                    if h["type"] == "normal":
+                        res = normal_hinge(h, res, current_height)
+                    else:
+                        res = ball_joint(h, res, current_height)
+
+                out_file = f"result.{out_format}"
+                cq.exporters.export(res, out_file)
+                st.success("Модель готова!")
+
+                with open(out_file, "rb") as f:
+                    st.download_button(
+                        label=f"💾 Скачать {out_format.upper()}",
+                        data=f,
+                        file_name=out_file,
+                        mime=f"model/{out_format}",
+                        use_container_width=True
+                    )
 else:
-    st.info("👈 Загрузите файл изображения в боковом меню слева, чтобы начать работу.")
+    st.info("👈 Загрузите файл изображения в боковой панели слева.")
