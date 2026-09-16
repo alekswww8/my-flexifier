@@ -158,25 +158,23 @@ if 'hinge_list' not in st.session_state:
 if 'cur_h_idx' not in st.session_state:
     st.session_state['cur_h_idx'] = 0
 
-# ВЕРХНИЙ БЛОК НАСТРОЕК
-st.write("### ⚙️ Настройки")
-t_col1, t_col2, t_col3, t_col4 = st.columns([1, 1, 2, 1.5])
-
-with t_col1:
+# ВЕРХНЯЯ СТРОКА НАСТРОЕК
+t1, t2, t3, t4 = st.columns([1, 1, 2, 1.2])
+with t1:
     filetype = st.selectbox("Формат файла", ["jpg", "png", "jpeg", "svg"])
-with t_col2:
+with t2:
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
-with t_col3:
+with t3:
     uploaded_file = st.file_uploader("Загрузите файл", type=[filetype])
-with t_col4:
+with t4:
     st.write(f"**Толщина Z:** {st.session_state['height_val']:.1f} мм")
-    h_b1, h_b2 = st.columns(2)
-    with h_b1:
-        if st.button("➖ Тоньше"):
+    hb1, hb2 = st.columns(2)
+    with hb1:
+        if st.button("➖ 1мм"):
             st.session_state['height_val'] = max(2.0, st.session_state['height_val'] - 1.0)
             st.rerun()
-    with h_b2:
-        if st.button("➕ Толще"):
+    with hb2:
+        if st.button("➕ 1мм"):
             st.session_state['height_val'] = min(50.0, st.session_state['height_val'] + 1.0)
             st.rerun()
 
@@ -205,59 +203,56 @@ if uploaded_file is not None:
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
 
+    # Широкий холст под фигуру
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
-    c_width = 560
+    c_width = 850
     c_height = int(raw_img.height * (c_width / raw_img.width))
     bg_img = raw_img.resize((c_width, c_height))
 
-    # ДВЕ КОЛОНКИ НА ОДНОМ ГОРИЗОНТАЛЬНОМ УРОВНЕ
-    col_ctrl, col_canvas = st.columns([1, 1.2])
+    # Колонки: узкое управление [1] и широкая карта [3.5]
+    col_ctrl, col_canvas = st.columns([1, 3.5])
 
     with col_ctrl:
-        st.subheader("Управление шарниром")
+        st.write("### 🎛️ Шарнир")
         h_options = [f"Шарнир №{i+1}" for i in range(len(st.session_state['hinge_list']))]
-        selected = st.selectbox("Активный шарнир:", h_options, index=st.session_state['cur_h_idx'])
+        selected = st.selectbox("Выбор:", h_options, index=st.session_state['cur_h_idx'])
         h_idx = h_options.index(selected)
         st.session_state['cur_h_idx'] = h_idx
 
         cur_h = st.session_state['hinge_list'][h_idx]
-        cur_h['type'] = st.selectbox("Тип соединения:", ["normal", "ball"], index=0 if cur_h['type'] == 'normal' else 1)
+        cur_h['type'] = st.selectbox("Тип:", ["normal", "ball"], index=0 if cur_h['type'] == 'normal' else 1)
 
-        st.info("👉 **Кликните прямо по фигуре на картинке справа** — шарнир переместится в эту точку.")
-
-        st.markdown(f"**Координаты:** X = `{cur_h['x']:.1f} мм`, Y = `{cur_h['y']:.1f} мм`")
+        st.caption("Кликните мышкой по телу кота справа для переноса оси.")
+        st.markdown(f"`X: {cur_h['x']:.1f} | Y: {cur_h['y']:.1f} мм`")
 
         r1, r2 = st.columns(2)
         with r1:
-            if st.button("🔄 Повернуть (-15°)"):
+            if st.button("🔄 -15°"):
                 cur_h['rot'] -= 15.0
                 st.rerun()
         with r2:
-            if st.button("🔁 Повернуть (+15°)"):
+            if st.button("🔁 +15°"):
                 cur_h['rot'] += 15.0
                 st.rerun()
 
-        st.write("---")
-        add_c, rem_c = st.columns(2)
-        with add_c:
-            if st.button("➕ Добавить шарнир"):
+        ac1, ac2 = st.columns(2)
+        with ac1:
+            if st.button("➕ Доб."):
                 st.session_state['hinge_list'].append({'x': 0.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'})
                 st.rerun()
-        with rem_c:
-            if st.button("🗑️ Удалить шарнир", disabled=(len(st.session_state['hinge_list']) <= 1)):
+        with ac2:
+            if st.button("🗑️ Удал.", disabled=(len(st.session_state['hinge_list']) <= 1)):
                 st.session_state['hinge_list'].pop(h_idx)
                 st.session_state['cur_h_idx'] = 0
                 st.rerun()
 
         st.write("---")
-        build_btn = st.button("🚀 Собрать модель (STL/STEP)", use_container_width=True)
+        build_btn = st.button("🚀 Собрать STL", use_container_width=True)
 
     with col_canvas:
-        st.subheader("Интерактивная карта (кликните мышкой)")
-
-        # Наносим линии шарниров на изображение
-        img_with_overlay = bg_img.copy()
-        draw = ImageDraw.Draw(img_with_overlay)
+        # Наносим линии и маркеры шарниров прямо на картинку
+        img_overlay = bg_img.copy()
+        draw = ImageDraw.Draw(img_overlay)
 
         for i, h in enumerate(st.session_state['hinge_list']):
             px = int(((h['x'] / bbox.xlen) + 0.5) * c_width)
@@ -268,36 +263,34 @@ if uploaded_file is not None:
             dot_color = (255, 255, 0, 255) if is_cur else (255, 255, 255, 255)
 
             rad = math.radians(h['rot'])
-            dx = math.sin(rad) * 60
-            dy = math.cos(rad) * 60
-            draw.line([(px - dx, py - dy), (px + dx, py + dy)], fill=line_color, width=5)
-            draw.ellipse([(px - 8, py - 8), (px + 8, py + 8)], fill=dot_color, outline=(0, 0, 0, 255), width=2)
+            dx = math.sin(rad) * 70
+            dy = math.cos(rad) * 70
+            draw.line([(px - dx, py - dy), (px + dx, py + dy)], fill=line_color, width=6)
+            draw.ellipse([(px - 10, py - 10), (px + 10, py + 10)], fill=dot_color, outline=(0, 0, 0, 255), width=2)
 
         canvas_result = st_canvas(
-            fill_color="rgba(255, 0, 0, 0.4)",
-            stroke_width=2,
-            stroke_color="#FF0000",
-            background_image=img_with_overlay,
+            stroke_width=0,
+            background_image=img_overlay,
             update_streamlit=True,
             height=c_height,
             width=c_width,
             drawing_mode="point",
-            point_display_radius=5,
-            key=f"canvas_interactive_{h_idx}"
+            point_display_radius=8,
+            key=f"canvas_{h_idx}_{len(st.session_state['hinge_list'])}"
         )
 
-        # Считывание координат клика
+        # Считывание клика мыши без задержек
         if canvas_result.json_data is not None:
             objs = canvas_result.json_data.get("objects", [])
             if objs:
-                last_obj = objs[-1]
-                click_x = last_obj.get("left", 0)
-                click_y = last_obj.get("top", 0)
+                last_pt = objs[-1]
+                click_x = last_pt.get("left", 0)
+                click_y = last_pt.get("top", 0)
 
                 new_x = ((click_x / c_width) - 0.5) * bbox.xlen
                 new_y = -((click_y / c_height) - 0.5) * bbox.ylen
 
-                if abs(new_x - cur_h['x']) > 1.0 or abs(new_y - cur_h['y']) > 1.0:
+                if abs(new_x - cur_h['x']) > 0.5 or abs(new_y - cur_h['y']) > 0.5:
                     cur_h['x'] = new_x
                     cur_h['y'] = new_y
                     st.rerun()
