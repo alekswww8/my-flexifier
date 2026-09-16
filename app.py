@@ -156,7 +156,7 @@ if 'scale_val' not in st.session_state:
 col_settings, col_canvas = st.columns([1, 2])
 
 with col_settings:
-    filetype = st.selectbox("Формат файла", ["png", "jpg", "jpeg", "svg"])
+    filetype = st.selectbox("Формат файла", ["jpg", "png", "jpeg", "svg"])
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
     hinge_type = st.selectbox("Тип шарнира", ["normal", "ball"])
 
@@ -189,6 +189,7 @@ if uploaded_file is not None:
     with open(raw_path, "wb") as f:
         f.write(uploaded_file.getvalue())
 
+    # Векторизация
     if filetype == "png":
         subprocess.run(f"convert {raw_path} -background white -alpha remove -alpha off {raw_path}", shell=True)
     if filetype != "svg":
@@ -198,7 +199,6 @@ if uploaded_file is not None:
         subprocess.run(f"cp {raw_path} file.svg", shell=True)
 
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
-    
     base_w = 600
     base_h = int(raw_img.height * (base_w / raw_img.width))
     cur_scale = st.session_state['scale_val'] / 100.0
@@ -219,12 +219,10 @@ if uploaded_file is not None:
             key="fixed_canvas"
         )
 
-    # Автоматическое распознавание линий сразу при отпускании мыши
     hinges = []
     if canvas_result.json_data is not None:
         objects = canvas_result.json_data.get("objects", [])
         for obj in objects:
-            # Поддержка Fabric.js: берем x1, y1, x2, y2 или относительные left/top
             x1 = obj.get("x1")
             y1 = obj.get("y1")
             x2 = obj.get("x2")
@@ -265,8 +263,17 @@ if uploaded_file is not None:
                     current_height = st.session_state['height_val']
                     scale_val = 0.4 * cur_scale
 
-                    scad_code = f'scale([{scale_val}, {scale_val}, 1]) import("file.svg", center=true);'
-                    subprocess.run(f'openscad -e \'{scad_code}\' -o file.dxf', shell=True)
+                    # Создаем надежный .scad файл для конвертации в DXF
+                    scad_content = f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg", center = true);'
+                    with open("svg_to_dxf.scad", "w") as f:
+                        f.write(scad_content)
+
+                    # Запускаем OpenSCAD с выводом DXF
+                    subprocess.run("openscad svg_to_dxf.scad -o file.dxf", shell=True)
+
+                    if not os.path.exists("file.dxf"):
+                        st.error("Не удалось сгенерировать DXF-контур из картинки. Проверьте формат файла.")
+                        st.stop()
 
                     res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
                     for h in hinges:
