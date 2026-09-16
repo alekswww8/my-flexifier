@@ -5,7 +5,7 @@ import subprocess
 import time
 import cadquery as cq
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageOps
 from streamlit_drawable_canvas import st_canvas
 
 hor_tolerance = 0.8
@@ -158,7 +158,7 @@ col_settings, col_canvas = st.columns([1, 2])
 with col_settings:
     filetype = st.selectbox("Формат файла", ["jpg", "png", "jpeg", "svg"])
     out_format = st.selectbox("Формат сохранения", ["stl", "step"])
-    hinge_type = st.selectbox("Тип шарнира", ["normal", "ball"])
+    hinge_type = st.selectbox("Тип шарнира", ["ball", "normal"])
 
     st.write(f"**Размер картинки:** {st.session_state['scale_val']}%")
     sc1, sc2 = st.columns(2)
@@ -189,6 +189,7 @@ if uploaded_file is not None:
     with open(raw_path, "wb") as f:
         f.write(uploaded_file.getvalue())
 
+    # Векторизация
     if filetype == "png":
         subprocess.run(f"convert {raw_path} -background white -alpha remove -alpha off {raw_path}", shell=True)
     if filetype != "svg":
@@ -200,21 +201,22 @@ if uploaded_file is not None:
     cur_scale = st.session_state['scale_val'] / 100.0
     scale_val = 0.4 * cur_scale
     with open("svg_to_dxf.scad", "w") as f:
-        f.write(f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg", center = true);')
+        f.write(f'scale([{scale_val}, {scale_val}, 1]) import(file = "file.svg");')
     subprocess.run("openscad svg_to_dxf.scad -o file.dxf", shell=True)
 
+    # Загружаем базовую геометрию и находим её реальный центр
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
+    center_x = (bbox.xmin + bbox.xmax) / 2.0
+    center_y = (bbox.ymin + bbox.ymax) / 2.0
 
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
-    base_w = 600
-    base_h = int(raw_img.height * (base_w / raw_img.width))
-    c_width = int(base_w * cur_scale)
-    c_height = int(base_h * cur_scale)
+    c_width = 600
+    c_height = int(raw_img.height * (c_width / raw_img.width))
     bg_img = raw_img.resize((c_width, c_height))
 
     with col_canvas:
-        st.info("✏️ **Проведите линии мышкой** поперёк детали в местах шарниров:")
+        st.info("✏️ **Проведите линии мышкой** сверху вниз поперёк детали в местах шарниров:")
         canvas_result = st_canvas(
             stroke_width=4,
             stroke_color="#FF0000",
@@ -235,13 +237,15 @@ if uploaded_file is not None:
             x2 = obj.get("x2", x1 + obj.get("width", 0))
             y2 = obj.get("y2", y1 + obj.get("height", 0))
 
-            # Перевод координат от центра изображения к CAD-центру детали
-            norm_x = (x1 + x2) / 2.0 / c_width - 0.5
-            norm_y = (y1 + y2) / 2.0 / c_height - 0.5
+            # Нормализация координат мыши от 0.0 до 1.0 по ширине и высоте холста
+            u = ((x1 + x2) / 2.0) / c_width
+            v = ((y1 + y2) / 2.0) / c_height
 
-            cq_x = norm_x * bbox.xlen + (bbox.xmin + bbox.xmax) / 2.0
-            cq_y = -norm_y * bbox.ylen + (bbox.ymin + bbox.ymax) / 2.0
+            # Точный маппинг в Bounding Box модели
+            cq_x = bbox.xmin + u * bbox.xlen - center_x
+            cq_y = bbox.ymax - v * bbox.ylen - center_y
 
+            # Наклон линии
             dx = (x2 - x1) * (bbox.xlen / c_width)
             dy = -(y2 - y1) * (bbox.ylen / c_height)
             line_len = math.sqrt(dx**2 + dy**2)
@@ -252,7 +256,7 @@ if uploaded_file is not None:
                 "h_tran": [cq_x, cq_y],
                 "h_rot": angle,
                 "h_break": 3.0,
-                "h_break_len": max(line_len * 1.6, bbox.ylen * 1.5),
+                "h_break_len": max(line_len * 1.5, bbox.ylen * 1.5),
                 "h_diam": st.session_state['height_val'],
                 "h_thick": max(st.session_state['height_val'] * 0.5, 4.0),
                 "h_expose": True
@@ -265,9 +269,16 @@ if uploaded_file is not None:
             if len(hinges) == 0:
                 st.warning("Нарисуйте хотя бы одну линию на изображении!")
             else:
-                with st.spinner("Вырезание шарниров..."):
+                with st.spinner("Сборка и вырезание шарниров..."):
                     current_height = st.session_state['height_val']
-                    res = cq.importers.importDXF("file.dxf").wires().toPending().extrude(current_height)
+                    # Центрируем базовую модель в (0, 0), чтобы она совпадала с координатами холста
+                    res = (
+                        cq.importers.importDXF("file.dxf")
+                        .wires()
+                        .toPending()
+                        .extrude(current_height)
+                        .translate([-center_x, -center_y, 0])
+                    )
 
                     for h in hinges:
                         if h["type"] == "normal":
