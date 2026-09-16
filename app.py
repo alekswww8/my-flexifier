@@ -16,20 +16,20 @@ def cut_image(h, res, height):
     chamfer = h['h_break'] * chamfer_multi
     cut_im = (
         cq.Workplane('XY')
-        .box(h['h_break'], h['h_break_len'], height, centered=(True, True, False))
+        .box(h['h_break'], h['h_break_len'], height, centered=(1, 1, 0))
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     chamfer_top = (
         cq.Workplane('XY')
-        .box(chamfer, h['h_break_len'], chamfer, centered=(True, True, True))
+        .box(chamfer, h['h_break_len'], chamfer)
         .rotate([0, 0, 0], [0, 1, 0], 45)
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     chamfer_bot = (
         cq.Workplane('XY')
-        .box(chamfer, h['h_break_len'], chamfer, centered=(True, True, True))
+        .box(chamfer, h['h_break_len'], chamfer)
         .rotate([0, 0, 0], [0, 1, 0], 45)
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], height])
@@ -46,7 +46,7 @@ def normal_hinge(h, res, height):
     hole_h_im_x = (h['h_diam'] + pin_diam) / 2 + hor_tolerance
     hole_im = (
         cq.Workplane('XY')
-        .box(hole_h_im_x, h['h_thick'] + hor_tolerance * 2, height, centered=(True, True, False))
+        .box(hole_h_im_x, h['h_thick'] + hor_tolerance * 2, height, centered=(1, 1, 0))
         .translate([-hole_h_im_x / 2 - h['h_break'] / 2, 0, 0])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
@@ -56,28 +56,28 @@ def normal_hinge(h, res, height):
     hole_diam = pin_diam + vert_tolerance
     hinge_corn = (
         cq.Workplane('XZ')
-        .box(hole_h_im_x / 2 + chamfer * math.sqrt(2), h['h_diam'], h['h_thick'], centered=(False, False, True))
+        .box(hole_h_im_x / 2 + chamfer * math.sqrt(2), h['h_diam'], h['h_thick'], centered=(0, 0, 1))
         .translate([-h['h_break'] / 2 - pin_diam / 2, 0, height / 2 - h['h_diam'] / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_ext = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'], h['h_diam'] / 2, centered=(True, False, True))
+        .cylinder(h['h_thick'], h['h_diam'] / 2, centered=(1, 0, 1))
         .translate([x_hinge, 0, height / 2 - h['h_diam'] / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_hole = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'], hole_diam / 2, centered=(True, False, True))
+        .cylinder(h['h_thick'], hole_diam / 2, centered=(1, 0, 1))
         .translate([x_hinge, 0, height / 2 - hole_diam / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
     hinge_pin = (
         cq.Workplane('XZ')
-        .cylinder(h['h_thick'] + hor_tolerance * 2, pin_diam / 2, centered=(True, False, True))
+        .cylinder(h['h_thick'] + hor_tolerance * 2, pin_diam / 2, centered=(1, 0, 1))
         .translate([x_hinge, 0, height / 2 - pin_diam / 2])
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
@@ -103,12 +103,21 @@ def ball_joint(h, res, height):
         .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
         .translate([h['h_tran'][0], h['h_tran'][1], 0])
     )
-    hole_join = (
-        cq.Workplane('XY')
-        .box(h['h_break'] + (h['h_diam'] / 2 + hor_tolerance) * 2, h['h_diam'] / 2 + hor_tolerance, height, centered=(True, True, False))
-        .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
-        .translate([h['h_tran'][0], h['h_tran'][1], 0])
-    )
+    if h.get('h_expose', True):
+        hole_join = (
+            cq.Workplane('XY')
+            .box(h['h_break'] + (h['h_diam'] / 2 + hor_tolerance) * 2, h['h_diam'] / 2 + hor_tolerance, height, centered=(1, 1, 0))
+            .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
+            .translate([h['h_tran'][0], h['h_tran'][1], 0])
+        )
+    else:
+        hole_join = (
+            cq.Workplane('YZ')
+            .cylinder(h['h_break'] + h['h_diam'], h['h_diam'] / 4 + hor_tolerance)
+            .translate([0, 0, height / 2])
+            .rotate([0, 0, 0], [0, 0, 1], h['h_rot'])
+            .translate([h['h_tran'][0], h['h_tran'][1], 0])
+        )
     res -= hole_im1 + hole_im2 + hole_join
 
     ball1 = (
@@ -138,15 +147,13 @@ def ball_joint(h, res, height):
 st.set_page_config(layout="wide")
 st.title("Flexifier: Интерактивный редактор")
 
-# Инициализация параметров
 if 'height_val' not in st.session_state:
     st.session_state['height_val'] = 8.0
 if 'hinge_list' not in st.session_state:
-    # По умолчанию создаем 3 шарнира поперек тела
     st.session_state['hinge_list'] = [
-        {'x': -30.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'},
+        {'x': -25.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'},
         {'x': 0.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'},
-        {'x': 30.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'}
+        {'x': 25.0, 'y': 0.0, 'rot': 0.0, 'type': 'normal'}
     ]
 if 'cur_h_idx' not in st.session_state:
     st.session_state['cur_h_idx'] = 0
@@ -183,7 +190,6 @@ if uploaded_file is not None:
     else:
         subprocess.run(f"cp {raw_path} file.svg", shell=True)
 
-    # Чистим старый DXF перед сборкой
     if os.path.exists("file.dxf"):
         os.remove("file.dxf")
 
@@ -203,12 +209,10 @@ if uploaded_file is not None:
         st.session_state['cur_h_idx'] = h_idx
 
         cur_h = st.session_state['hinge_list'][h_idx]
-
         cur_h['type'] = st.selectbox("Тип соединения:", ["normal", "ball"], index=0 if cur_h['type'] == 'normal' else 1)
 
         st.write(f"Позиция X: **{cur_h['x']:.1f} мм** | Y: **{cur_h['y']:.1f} мм**")
         
-        # Кнопки перемещения выбранного шарнира
         p1, p2, p3, p4 = st.columns(4)
         with p1:
             if st.button("⬅️ -5мм"):
@@ -249,28 +253,38 @@ if uploaded_file is not None:
                 st.session_state['cur_h_idx'] = 0
                 st.rerun()
 
-    # Генерация OpenSCAD предпросмотра
+    # Генерация предпросмотра с меткой оси шарнира
     scad_preview_parts = []
     for i, h in enumerate(st.session_state['hinge_list']):
-        col = "red" if i == h_idx else "blue"
+        is_active = (i == h_idx)
+        bar_color = "red" if is_active else "navy"
+        dot_color = "yellow" if is_active else "white"
+        
         scad_preview_parts.append(
-            f'translate([{h["x"]}, {h["y"]}, 0]) rotate([0, 0, {h["rot"]}]) '
-            f'color("{col}") linear_extrude({st.session_state["height_val"] * 1.2}) square([3, {bbox.ylen * 1.5}], center=true);'
+            f'''
+            translate([{h["x"]}, {h["y"]}, 0]) rotate([0, 0, {h["rot"]}]) {{
+                color("{bar_color}") linear_extrude({st.session_state["height_val"] * 1.3}) square([3, {bbox.ylen * 1.5}], center=true);
+                color("{dot_color}") translate([0, 0, {st.session_state["height_val"]}]) sphere(d={st.session_state["height_val"] * 1.2});
+            }}
+            '''
         )
 
     preview_scad_code = f"""
-    $fn=15;
+    $fn=20;
     color("lightgreen") linear_extrude({st.session_state['height_val']}) import("file.dxf");
     {' '.join(scad_preview_parts)}
     """
     with open("live_preview.scad", "w") as f:
         f.write(preview_scad_code)
 
-    subprocess.run("xvfb-run -a openscad -o live_preview.png --autocenter --viewall live_preview.scad", shell=True)
+    subprocess.run(
+        "xvfb-run -a openscad -o live_preview.png --camera 0,0,0,0,0,0,0 --projection=ortho --autocenter --viewall live_preview.scad",
+        shell=True
+    )
 
     with col_view:
         if os.path.exists("live_preview.png"):
-            st.image("live_preview.png", caption="🟢 Тело рыбы | 🔴 Активный разрез | 🔵 Остальные разрезы", use_container_width=True)
+            st.image("live_preview.png", caption="🟡 Желтый шар — центр активного шарнира | ⚪ Белый шар — остальные шарниры", use_container_width=True)
 
         if st.button("🚀 Собрать финальную модель (STL/STEP)", use_container_width=True):
             with st.spinner("Генерация CAD-геометрии..."):
