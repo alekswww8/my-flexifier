@@ -5,8 +5,7 @@ import subprocess
 import time
 import cadquery as cq
 import streamlit as st
-from PIL import Image
-from streamlit_drawable_canvas import st_canvas
+from PIL import Image, ImageDraw
 
 hor_tolerance = 0.8
 vert_tolerance = 0.8
@@ -158,22 +157,29 @@ if 'hinge_list' not in st.session_state:
 if 'cur_h_idx' not in st.session_state:
     st.session_state['cur_h_idx'] = 0
 
-with st.sidebar:
-    st.title("⚙️ Настройки")
-    filetype = st.selectbox("Формат файла", ["jpg", "png", "jpeg", "svg"])
-    out_format = st.selectbox("Формат сохранения", ["stl", "step"])
-    uploaded_file = st.file_uploader("Загрузите файл", type=[filetype])
+# ВЕРХНИЙ БЛОК НАСТРОЕК
+st.write("### ⚙️ Настройки")
+t_col1, t_col2, t_col3, t_col4 = st.columns([1, 1, 2, 1.5])
 
-    st.write(f"**Толщина детали (Z):** {st.session_state['height_val']:.1f} мм")
-    hb1, hb2 = st.columns(2)
-    with hb1:
+with t_col1:
+    filetype = st.selectbox("Формат файла", ["jpg", "png", "jpeg", "svg"])
+with t_col2:
+    out_format = st.selectbox("Формат сохранения", ["stl", "step"])
+with t_col3:
+    uploaded_file = st.file_uploader("Загрузите файл", type=[filetype])
+with t_col4:
+    st.write(f"**Толщина Z:** {st.session_state['height_val']:.1f} мм")
+    h_b1, h_b2 = st.columns(2)
+    with h_b1:
         if st.button("➖ Тоньше"):
             st.session_state['height_val'] = max(2.0, st.session_state['height_val'] - 1.0)
             st.rerun()
-    with hb2:
+    with h_b2:
         if st.button("➕ Толще"):
             st.session_state['height_val'] = min(50.0, st.session_state['height_val'] + 1.0)
             st.rerun()
+
+st.write("---")
 
 if uploaded_file is not None:
     raw_path = f"file.{filetype}"
@@ -198,27 +204,28 @@ if uploaded_file is not None:
     base_model = cq.importers.importDXF("file.dxf").wires().toPending().extrude(st.session_state['height_val'])
     bbox = base_model.combine().objects[0].BoundingBox()
 
-    # Размер холста
+    # Размеры интерактивного поля
     raw_img = Image.open(raw_path if filetype != "svg" else "file.pnm").convert("RGBA")
-    c_width = 540
+    c_width = 560
     c_height = int(raw_img.height * (c_width / raw_img.width))
     bg_img = raw_img.resize((c_width, c_height))
 
+    # ДВЕ КОЛОНКИ НА ОДНОМ УРОВНЕ
     col_ctrl, col_canvas = st.columns([1, 1.2])
 
     with col_ctrl:
         st.subheader("Управление шарниром")
         h_options = [f"Шарнир №{i+1}" for i in range(len(st.session_state['hinge_list']))]
-        selected = st.selectbox("Активный шарнир для позиционирования:", h_options, index=st.session_state['cur_h_idx'])
+        selected = st.selectbox("Активный шарнир:", h_options, index=st.session_state['cur_h_idx'])
         h_idx = h_options.index(selected)
         st.session_state['cur_h_idx'] = h_idx
 
         cur_h = st.session_state['hinge_list'][h_idx]
         cur_h['type'] = st.selectbox("Тип соединения:", ["normal", "ball"], index=0 if cur_h['type'] == 'normal' else 1)
 
-        st.info("👉 **Кликните мышкой прямо по коту на картинке справа** — ось шарнира моментально прыгнет в точку клика.")
+        st.info("👉 **Кликните прямо по фигуре на картинке справа** — центр шарнира перепрыгнет в точку клика.")
 
-        st.markdown(f"**Текущие координаты:** X = `{cur_h['x']:.1f} мм`, Y = `{cur_h['y']:.1f} мм`")
+        st.markdown(f"**Координаты:** X = `{cur_h['x']:.1f} мм`, Y = `{cur_h['y']:.1f} мм`")
 
         r1, r2 = st.columns(2)
         with r1:
@@ -247,49 +254,49 @@ if uploaded_file is not None:
 
     with col_canvas:
         st.subheader("Интерактивная карта (кликните мышкой)")
-        # Отображаем текущие линии на холсте
-        initial_lines = []
+        
+        # Рисуем шарниры прямо на изображении, чтобы холст не блокировал клики
+        img_with_overlay = bg_img.copy()
+        draw = ImageDraw.Draw(img_with_overlay)
+
         for i, h in enumerate(st.session_state['hinge_list']):
-            pix_x = int(((h['x'] / bbox.xlen) + 0.5) * c_width)
-            pix_y = int(((-h['y'] / bbox.ylen) + 0.5) * c_height)
-            color_str = "#FF0000" if i == h_idx else "#0055FF"
-            initial_lines.append({
-                "type": "line",
-                "x1": pix_x, "y1": max(0, pix_y - 60),
-                "x2": pix_x, "y2": min(c_height, pix_y + 60),
-                "stroke": color_str, "strokeWidth": 5
-            })
-            initial_lines.append({
-                "type": "circle",
-                "left": pix_x - 8, "top": pix_y - 8,
-                "radius": 8, "fill": "#FFFF00" if i == h_idx else "#FFFFFF",
-                "stroke": "#000000", "strokeWidth": 2
-            })
+            px = int(((h['x'] / bbox.xlen) + 0.5) * c_width)
+            py = int(((-h['y'] / bbox.ylen) + 0.5) * c_height)
+            is_cur = (i == h_idx)
+
+            line_color = (255, 0, 0, 255) if is_cur else (0, 85, 255, 255)
+            dot_color = (255, 255, 0, 255) if is_cur else (255, 255, 255, 255)
+
+            # Наклонная линия реза
+            rad = math.radians(h['rot'])
+            dx = math.sin(rad) * 60
+            dy = math.cos(rad) * 60
+            draw.line([(px - dx, py - dy), (px + dx, py + dy)], fill=line_color, width=5)
+            # Центральный маркер
+            draw.ellipse([(px - 8, py - 8), (px + 8, py + 8)], fill=dot_color, outline=(0, 0, 0, 255), width=2)
 
         canvas_result = st_canvas(
-            stroke_width=3,
+            fill_color="rgba(255, 165, 0, 0.3)",
+            stroke_width=2,
             stroke_color="#FF0000",
-            background_image=bg_img,
-            initial_drawing={"version": "4.4.0", "objects": initial_lines},
+            background_image=img_with_overlay,
             update_streamlit=True,
             height=c_height,
             width=c_width,
             drawing_mode="point",
             point_display_radius=0,
-            key=f"canvas_click_{h_idx}"
+            key=f"click_canvas_{h_idx}_{len(st.session_state['hinge_list'])}"
         )
 
-        # Считываем точку клика мыши и мгновенно перемещаем шарнир
+        # Мгновенная реакция на клик мыши
         if canvas_result.json_data is not None:
             objs = canvas_result.json_data.get("objects", [])
-            # Ищем новую поставленную точку
-            new_points = [o for o in objs if o.get("type") == "circle" and "radius" not in o]
-            if new_points:
-                last_pt = new_points[-1]
-                click_x = last_pt.get("left", 0)
-                click_y = last_pt.get("top", 0)
+            if objs:
+                last_obj = objs[-1]
+                click_x = last_obj.get("left", 0)
+                click_y = last_obj.get("top", 0)
 
-                # Переводим точку клика в координаты CAD-модели
+                # Перевод точки клика в координаты детали
                 cur_h['x'] = ((click_x / c_width) - 0.5) * bbox.xlen
                 cur_h['y'] = -((click_y / c_height) - 0.5) * bbox.ylen
                 st.rerun()
@@ -328,4 +335,4 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
 else:
-    st.info("👈 Загрузите файл изображения в панели слева.")
+    st.info("👈 Загрузите файл изображения в блоке настроек выше, чтобы начать.")
